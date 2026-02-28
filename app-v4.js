@@ -36,7 +36,7 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
-console.log("App Version: 2.0.8 - Active Sync Edition");
+console.log("App Version: 2.1.0 - Menu Gallery Edition");
 
 // ==========================================
 // 0. 故障保險 (Failsafe Watchdog)
@@ -99,6 +99,11 @@ async function init() {
         if (orderForm) orderForm.addEventListener('submit', handleNewOrder);
         if (orderAmount) orderAmount.addEventListener('input', calculatePreview);
         if (adminAddUserForm) adminAddUserForm.addEventListener('submit', handleAdminAddUser);
+
+        // 綁定菜單上傳表單
+        const menuForm = document.getElementById('menu-form');
+        if (menuForm) menuForm.addEventListener('submit', handleMenuSubmit);
+
         calculatePreview();
     } catch (eventErr) {
         console.error("事件綁定失敗:", eventErr);
@@ -325,8 +330,79 @@ async function handleAdminAddUser(e) {
 }
 
 // ==========================================
-// 7. 業務邏輯
+// 7. 業務邏輯與菜單管理
 // ==========================================
+async function handleMenuSubmit(e) {
+    e.preventDefault();
+    if (!profile) return;
+
+    const nameInput = document.getElementById('menu-name');
+    const priceInput = document.getElementById('menu-price');
+    const imageInput = document.getElementById('menu-image');
+    const btn = document.getElementById('menu-submit-btn');
+    const spinner = document.getElementById('menu-spinner');
+    const msg = document.getElementById('menu-upload-msg');
+
+    const name = nameInput.value;
+    const price = Number(priceInput.value);
+    const file = imageInput.files[0];
+
+    // UI 切換至上傳中
+    btn.disabled = true;
+    spinner.classList.remove('hidden');
+    msg.classList.remove('hidden');
+    msg.className = "text-xs text-center mt-2 text-blue-600";
+    msg.textContent = "上傳中，請稍候...";
+
+    try {
+        let imageUrl = null;
+
+        // 如果有選圖片，先將圖片送上 Supabase Storage
+        if (file) {
+            // 檔名加上時間戳以確保唯一性
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${profile.id}-${Date.now()}.${fileExt}`;
+
+            msg.textContent = "正在將圖片送至雲端...";
+            const { data: uploadData, error: uploadError } = await supabaseClient.storage
+                .from('menu-images')
+                .upload(fileName, file, { upsert: false });
+
+            if (uploadError) throw new Error("圖片上傳失敗: " + uploadError.message);
+
+            // 取得公開下載網址
+            const { data: publicUrlData } = supabaseClient.storage.from('menu-images').getPublicUrl(fileName);
+            imageUrl = publicUrlData.publicUrl;
+        }
+
+        // 把菜單文字與圖片網址寫進資料庫
+        msg.textContent = "正在寫入菜單資料庫...";
+        const { error: dbError } = await supabaseClient.from('menus').insert([{
+            restaurant_id: profile.id,
+            item_name: name,
+            price: price,
+            image_url: imageUrl
+        }]);
+
+        if (dbError) throw new Error("資料庫寫入失敗: " + dbError.message);
+
+        // 成功收尾
+        msg.className = "text-xs text-center mt-2 text-green-600 font-bold";
+        msg.textContent = "✅ 菜品上架成功！";
+        document.getElementById('menu-form').reset();
+        await loadRestaurantData(); // 重新整理畫面
+
+    } catch (err) {
+        console.error("菜單上傳流程發生錯誤:", err);
+        msg.className = "text-xs text-center mt-2 text-red-500 font-bold";
+        msg.textContent = "❌ " + err.message;
+    } finally {
+        // UI 復原
+        btn.disabled = false;
+        spinner.classList.add('hidden');
+    }
+}
+
 async function handleNewOrder(e) {
     e.preventDefault();
     if (!profile) return;
@@ -348,13 +424,49 @@ async function handleNewOrder(e) {
 }
 
 async function loadRestaurantData() {
-    const { data, error } = await supabaseClient
+    // 1. 讀取並渲染訂單歷史
+    const { data: jobsData, error: jobsError } = await supabaseClient
         .from('jobs')
         .select(`id, description, total_amount, status, created_at, profiles!jobs_master_id_fkey(name)`)
         .eq('restaurant_id', profile.id)
         .order('created_at', { ascending: false });
 
-    if (!error) renderRestaurantHistory(data);
+    if (!jobsError) renderRestaurantHistory(jobsData);
+
+    // 2. 讀取並渲染菜單小卡
+    const { data: menuData, error: menuError } = await supabaseClient
+        .from('menus')
+        .select('*')
+        .eq('restaurant_id', profile.id)
+        .eq('is_available', true)
+        .order('created_at', { ascending: false });
+
+    if (!menuError) renderMenuGallery(menuData);
+}
+
+function renderMenuGallery(menus) {
+    const gallery = document.getElementById('restaurant-menu-gallery');
+    if (!gallery) return;
+
+    if (!menus || menus.length === 0) {
+        gallery.innerHTML = '<div class="col-span-2 text-center text-xs text-gray-500 py-6 bg-white rounded-lg shadow-sm border border-gray-100">現在還沒有任何菜色，請於上方新增 👇</div>';
+        return;
+    }
+
+    gallery.innerHTML = menus.map(m => `
+        <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200 flex flex-col">
+            ${m.image_url
+            ? `<div class="aspect-video w-full bg-gray-100 overflow-hidden relative">
+                     <img src="${m.image_url}" alt="${m.item_name}" class="w-full h-full object-cover">
+                   </div>`
+            : `<div class="aspect-video w-full bg-indigo-50 flex items-center justify-center text-indigo-300 text-2xl">🍽️</div>`
+        }
+            <div class="p-3 flex-1 flex flex-col justify-between">
+                <div class="font-bold text-gray-800 leading-tight mb-1 text-sm">${m.item_name}</div>
+                <div class="text-indigo-600 font-black">$${m.price}</div>
+            </div>
+        </div>
+    `).join('');
 }
 
 async function loadMasterData() {
@@ -374,7 +486,7 @@ function calculatePreview() {
 
 function renderRestaurantHistory(jobs) {
     const container = document.getElementById('restaurant-history');
-    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 text-sm py-4">尚無訂單</div>'; return; }
+    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 text-sm py-4 bg-white rounded-lg shadow-sm">尚無歷史訂單紀錄</div>'; return; }
     container.innerHTML = jobs.map(j => `
         <div class="p-3 bg-white rounded-lg shadow-sm text-sm border-l-4 border-blue-500 mb-2">
             <div class="font-bold flex justify-between"><span>${j.description}</span><span class="text-blue-600">$${j.total_amount}</span></div>
@@ -385,25 +497,26 @@ function renderRestaurantHistory(jobs) {
 
 function renderJobPool(jobs) {
     const container = document.getElementById('job-pool');
-    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">無新任務</div>'; return; }
+    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">目前全區無新任務可以接取</div>'; return; }
     container.innerHTML = jobs.map(j => `
-        <div class="bg-white p-4 rounded-xl shadow border border-indigo-100 mb-3">
-            <div class="font-bold">${j.profiles ? j.profiles.name : '未知餐廳'} <span class="float-right text-indigo-600">$${j.total_amount}</span></div>
+        <div class="bg-white p-4 rounded-xl shadow border border-indigo-100 mb-3 hover:shadow-md transition">
+            <div class="font-bold">${j.profiles ? j.profiles.name : '未知餐廳'} <span class="float-right text-indigo-600 font-extrabold">$${j.total_amount}</span></div>
             <div class="text-sm text-gray-600 my-2">${j.description}</div>
-            <button onclick="acceptJob('${j.id}')" class="w-full bg-indigo-600 text-white py-2 rounded-lg font-bold">馬上搶單</button>
+            <button onclick="acceptJob('${j.id}')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold transition">🚀 馬上搶單</button>
         </div>
     `).join('');
 }
 
 function renderMasterHistory(jobs) {
     const container = document.getElementById('master-history');
-    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">無接單紀錄</div>'; return; }
+    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">無接單紀錄，快去任務池看看吧！</div>'; return; }
     container.innerHTML = jobs.map(j => `
-        <div class="p-3 bg-white rounded-lg shadow-sm mb-2 border-l-4 ${j.status === 'completed' ? 'border-green-500' : 'border-orange-400'}">
+        <div class="p-3 bg-white rounded-lg shadow-sm mb-2 border-l-4 flex flex-col justify-between ${j.status === 'completed' ? 'border-green-500' : 'border-orange-400'}">
             <div class="font-bold flex justify-between"><span>${j.profiles ? j.profiles.name : '餐廳'}</span><span>$${Math.floor(j.total_amount * 0.19)}</span></div>
-            <div class="flex justify-between items-center mt-2">
-                <span class="text-xs text-gray-400">${j.description}</span>
-                ${j.status === 'accepted' ? `<button onclick="completeJob('${j.id}')" class="bg-green-500 text-white px-3 py-1 rounded text-xs">完工</button>` : `<span class="text-green-600 text-xs">已結算</span>`}
+            <div class="text-xs text-gray-500 my-2">${j.description}</div>
+            <div class="flex justify-between items-end mt-auto">
+                <span class="text-xs text-gray-400">系統單號：${j.id.substring(0, 8)}</span>
+                ${j.status === 'accepted' ? `<button onclick="completeJob('${j.id}')" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs transition font-bold shadow">✔ 標示完工</button>` : `<span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full text-xs font-bold border border-indigo-100">已結帳打單</span>`}
             </div>
         </div>
     `).join('');
@@ -411,15 +524,16 @@ function renderMasterHistory(jobs) {
 
 window.acceptJob = async function (id) {
     const { error } = await supabaseClient.from('jobs').update({ status: 'accepted', master_id: profile.id }).eq('id', id).eq('status', 'pending');
-    if (error) alert("搶單失敗！可能是已被搶走或權限不足"); else loadMasterData();
+    if (error) alert("搶單失敗！此單可能已被別的師傅搶走！"); else loadMasterData();
 };
 
 window.completeJob = async function (id) {
     const { error } = await supabaseClient.from('jobs').update({ status: 'completed' }).eq('id', id);
-    if (error) alert("更新失敗！"); else loadMasterData();
+    if (error) alert("更新失敗！可能權限不足或連線異常。"); else loadMasterData();
 };
 
 function showLoading() { loadingOverlay.classList.remove('hidden'); }
 function hideLoading() { loadingOverlay.classList.add('hidden'); }
 
+// 啟動點
 init();
