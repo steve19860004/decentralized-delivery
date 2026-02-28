@@ -8,6 +8,14 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const storeListContainer = document.getElementById('store-list-container');
 
+// 全域購物車狀態
+window.cart = {
+    restaurantId: null,
+    restaurantName: null,
+    address: null, // 店家實體地址
+    items: []      // { name, price, qty }
+};
+
 async function initStore() {
     console.log("正在載入首頁餐廳總覽...");
 
@@ -92,8 +100,8 @@ function renderStores(stores) {
                         <div class="font-bold text-gray-800 leading-tight mb-1 text-sm">${item.item_name}</div>
                         <div class="flex justify-between items-end mt-2">
                             <div class="text-indigo-600 font-black">$${item.price}</div>
-                            <!-- 呼叫下單彈窗模組，傳入店家ID與餐點資訊及真實地址 -->
-                            <button onclick="orderNow('${store.id}', '${store.name}', '${item.item_name}', ${item.price}, '${store.address}')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded-full transition shadow-sm">想吃</button>
+                            <!-- 呼叫加入購物車邏輯，傳入店家ID與餐點資訊及真實地址 -->
+                            <button onclick="addToCart('${store.id}', '${store.name}', '${item.item_name}', ${item.price}, '${store.address}')" class="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold px-3 py-1.5 rounded-full transition shadow-sm">加入購物車</button>
                         </div>
                     </div>
                 </div>
@@ -107,30 +115,44 @@ function renderStores(stores) {
 }
 
 // ------------------------------------------
-// 顧客直購與自動派單系統核心邏輯
+// 購物車與結帳系統邏輯
 // ------------------------------------------
 
-// 1. 開啟結帳小視窗
-window.orderNow = function (restaurantId, restaurantName, itemName, price, restaurantAddress) {
-    document.getElementById('checkout-restaurant-id').value = restaurantId;
-    document.getElementById('checkout-item-name').value = itemName;
-    document.getElementById('checkout-price').value = price;
+// 1. 加入購物車 (取代原本的 orderNow)
+window.addToCart = function (restaurantId, restaurantName, itemName, price, restaurantAddress) {
+    // 跨店防呆檢查：如果購物車內有東西，且跟正在點的不是同一家店
+    if (window.cart.items.length > 0 && window.cart.restaurantId !== restaurantId) {
+        alert(`無法加入購物車！\n\n您的購物車內已經有【${window.cart.restaurantName}】的餐點。\n同一次訂單只能向同一間餐廳訂購，請先結帳或清空購物車後再試。`);
+        return;
+    }
 
-    // 將店家動態地址存在全域，讓 Google API 取用
-    window.currentRestaurantAddress = restaurantAddress || '台北市信義區市府路1號';
+    // 如果是第一項商品，或同店家，就初始化/保留店家資訊
+    window.cart.restaurantId = restaurantId;
+    window.cart.restaurantName = restaurantName;
+    window.cart.address = restaurantAddress || '台北市信義區市府路1號';
+    window.currentRestaurantAddress = window.cart.address; // 兼容舊有地圖用的全域變數
 
-    // 初始化數量為 1
-    document.getElementById('checkout-quantity').value = 1;
-    document.getElementById('checkout-quantity-display').textContent = 1;
+    // 檢查購物車內是否已經有這個品項，有就加一，沒有就新增
+    const existingItem = window.cart.items.find(i => i.name === itemName);
+    if (existingItem) {
+        existingItem.qty += 1;
+    } else {
+        window.cart.items.push({
+            name: itemName,
+            price: Number(price),
+            qty: 1
+        });
+    }
 
-    document.getElementById('checkout-restaurant-name').textContent = restaurantName;
-    document.getElementById('checkout-item-display').textContent = itemName;
-    document.getElementById('checkout-unit-price').textContent = '$' + price;
-    document.getElementById('checkout-price-display').textContent = '$' + price;
+    // 更新懸浮按鈕與購物車 UI
+    renderCartUI();
 
-    document.getElementById('checkout-error').classList.add('hidden');
+    // 每次變動都退回首層狀態，隱藏運費預覽
+    resetFeePreview();
+};
 
-    // 重置運費試算 UI 狀態
+// 統整散落的運費狀態重置功能
+function resetFeePreview() {
     document.getElementById('checkout-fee-preview').classList.add('hidden');
     document.getElementById('checkout-submit-btn').classList.add('hidden');
     const calcBtn = document.getElementById('calc-fee-btn');
@@ -139,47 +161,106 @@ window.orderNow = function (restaurantId, restaurantName, itemName, price, resta
         calcBtn.disabled = false;
         calcBtn.innerHTML = '🔍 預估運費';
     }
-    window.currentDeliveryFee = 0; // 全域記錄
+    window.currentDeliveryFee = 0;
+}
 
+// 2. 渲染 UI (懸浮按鈕 & 內部清單)
+window.renderCartUI = function () {
+    const btn = document.getElementById('floating-cart-btn');
+    const badge = document.getElementById('floating-cart-badge');
+    const totalLabel = document.getElementById('floating-cart-total');
+
+    // 如果空車，隱藏懸浮按鈕並關閉結帳視窗如果有開
+    if (window.cart.items.length === 0) {
+        btn.classList.add('hidden');
+        window.cart.restaurantId = null;
+        window.cart.restaurantName = null;
+        window.cart.address = null;
+        closeCheckout();
+        return;
+    }
+
+    // 算出總件數與總餐費
+    let totalQty = 0;
+    let totalPrice = 0;
+    window.cart.items.forEach(item => {
+        totalQty += item.qty;
+        totalPrice += (item.price * item.qty);
+    });
+
+    btn.classList.remove('hidden');
+    btn.classList.add('flex');
+    badge.textContent = totalQty;
+    totalLabel.textContent = '$' + totalPrice;
+
+    // 渲染結帳視窗內的明細清單
+    const listContainer = document.getElementById('checkout-cart-items');
+    if (listContainer) {
+        listContainer.innerHTML = window.cart.items.map((item, index) => `
+            <div class="flex justify-between items-center bg-white p-2 border border-gray-100 rounded-lg shadow-sm">
+                <div class="flex-1">
+                    <div class="font-bold text-gray-800 text-sm">${item.name}</div>
+                    <div class="text-xs text-gray-500">單價: $${item.price}</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="changeItemQty(${index}, -1)" class="w-6 h-6 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200">-</button>
+                    <span class="w-4 text-center text-sm font-bold">${item.qty}</span>
+                    <button type="button" onclick="changeItemQty(${index}, 1)" class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 font-bold hover:bg-indigo-200">+</button>
+                    <button type="button" onclick="removeItem(${index})" class="ml-2 text-red-400 hover:text-red-600">🗑</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    const subtotalDisplay = document.getElementById('checkout-subtotal-display');
+    const subtotalInput = document.getElementById('checkout-subtotal');
+    if (subtotalDisplay && subtotalInput) {
+        subtotalDisplay.textContent = '$' + totalPrice;
+        subtotalInput.value = totalPrice;
+    }
+
+    // 如果當前運費欄位沒隱藏，跟著更新最新總價 (含運)
+    if (window.currentDeliveryFee > 0 && !document.getElementById('checkout-fee-preview').classList.contains('hidden')) {
+        document.getElementById('preview-total').textContent = '$' + (totalPrice + window.currentDeliveryFee);
+    }
+};
+
+// 小購物車內的數量操作
+window.changeItemQty = function (index, delta) {
+    if (window.cart.items[index]) {
+        window.cart.items[index].qty += delta;
+        if (window.cart.items[index].qty <= 0) {
+            window.cart.items.splice(index, 1);
+        }
+        renderCartUI();
+        resetFeePreview(); // 數量異動時一定要重來
+    }
+};
+
+window.removeItem = function (index) {
+    window.cart.items.splice(index, 1);
+    renderCartUI();
+    resetFeePreview();
+};
+
+// 3. 開啟結帳小視窗
+window.openCheckout = function () {
+    if (window.cart.items.length === 0) return;
     document.getElementById('checkout-modal').classList.remove('hidden');
-
-    // 小動畫延遲
     setTimeout(() => {
         document.getElementById('checkout-modal-content').classList.remove('translate-y-full');
     }, 10);
 };
 
-// 1.5 更新數量與計算總價
-window.updateQuantity = function (change) {
-    const qtyInput = document.getElementById('checkout-quantity');
-    const qtyDisplay = document.getElementById('checkout-quantity-display');
-    const totalPriceDisplay = document.getElementById('checkout-price-display');
-
-    // (已移除與運費相關的固定金額加總，交由後台計算)
-    const unitPrice = parseFloat(document.getElementById('checkout-price').value);
-
-    let currentQty = parseInt(qtyInput.value) || 1;
-    let newQty = currentQty + change;
-
-    // 數量下限為 1
-    if (newQty < 1) newQty = 1;
-
-    qtyInput.value = newQty;
-    qtyDisplay.textContent = newQty;
-    totalPriceDisplay.textContent = '$' + (unitPrice * newQty);
-
-    // 支援動態更新含運總價
-    if (window.currentDeliveryFee !== undefined && !document.getElementById('checkout-fee-preview').classList.contains('hidden')) {
-        document.getElementById('preview-total').textContent = '$' + ((unitPrice * newQty) + window.currentDeliveryFee);
-    }
-};
-
-// 2. 關閉結帳小視窗
+// 4. 關閉結帳小視窗
 window.closeCheckout = function () {
-    document.getElementById('checkout-modal-content').classList.add('translate-y-full');
+    const content = document.getElementById('checkout-modal-content');
+    if (content) content.classList.add('translate-y-full');
+
     setTimeout(() => {
-        document.getElementById('checkout-modal').classList.add('hidden');
-        document.getElementById('checkout-form').reset();
+        const modal = document.getElementById('checkout-modal');
+        if (modal) modal.classList.add('hidden');
+        // 這裡不要 reset()，保留地址和聯絡電話等。
     }, 300);
 };
 
@@ -229,7 +310,7 @@ if (calcFeeBtn && addressInput) {
                     document.getElementById('preview-distance').textContent = distanceText;
                     document.getElementById('preview-fee').textContent = '+$' + fee;
 
-                    const foodTotal = Number(document.getElementById('checkout-quantity').value) * Number(document.getElementById('checkout-price').value);
+                    const foodTotal = Number(document.getElementById('checkout-subtotal').value);
                     document.getElementById('preview-total').textContent = '$' + (foodTotal + fee);
 
                     // 隱藏試算鈕，解鎖確認送出鈕
@@ -254,30 +335,25 @@ if (calcFeeBtn && addressInput) {
 
     // 如果輸入框被修改，立刻退回「未試算」的防呆狀態
     addressInput.addEventListener('input', () => {
-        document.getElementById('checkout-fee-preview').classList.add('hidden');
-        document.getElementById('checkout-submit-btn').classList.add('hidden');
-        calcFeeBtn.classList.remove('hidden');
-        calcFeeBtn.disabled = false;
-        calcFeeBtn.innerHTML = '🔍 預估運費';
+        resetFeePreview();
     });
 }
 
-// 3. 綁定送出表單事件與 API 寫入
+// 6. 綁定送出表單事件與 API 寫入
 const checkoutForm = document.getElementById('checkout-form');
 if (checkoutForm) {
     checkoutForm.addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        const restaurantId = document.getElementById('checkout-restaurant-id').value;
-        const itemName = document.getElementById('checkout-item-name').value;
-        const unitPrice = Number(document.getElementById('checkout-price').value);
-        const quantity = parseInt(document.getElementById('checkout-quantity').value) || 1;
-        const finalPrice = unitPrice * quantity;
+        // 購物車防呆
+        if (window.cart.items.length === 0) return;
+
+        const restaurantId = window.cart.restaurantId;
+        const foodTotal = Number(document.getElementById('checkout-subtotal').value);
 
         const phone = document.getElementById('checkout-phone').value;
         const address = document.getElementById('checkout-address').value;
         const note = document.getElementById('checkout-note').value;
-        const restaurantName = document.getElementById('checkout-restaurant-name').textContent;
 
         const btn = document.getElementById('checkout-submit-btn');
         const originalText = btn.innerHTML;
@@ -287,8 +363,9 @@ if (checkoutForm) {
         btn.innerHTML = `<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white inline-block"></div> 訂單處理中...`;
         errorMsg.classList.add('hidden');
 
-        // 組合詳細的訂單文字
-        const orderDescription = `[直客點餐] ${itemName} x${quantity} 
+        // 組合詳細的訂單文字 (重要邏輯移轉)
+        let itemsDesc = window.cart.items.map(i => `${i.name} x${i.qty}`).join(', ');
+        const orderDescription = `[直客點餐] ${itemsDesc}
 📞 ${phone} 
 📍 ${address} 
 💬 ${note ? note : '無'}`;
@@ -301,7 +378,7 @@ if (checkoutForm) {
                 {
                     restaurant_id: restaurantId,
                     description: orderDescription,
-                    total_amount: finalPrice, // 只有餐費，運費將由 n8n 計算後 Update 回來
+                    total_amount: foodTotal, // 只有餐費總和，運費將由 n8n 計算後 Update 回來
                     destination_address: address,
                     restaurant_address: window.currentRestaurantAddress // 發給後台大腦一樣的真實地址
                 }
@@ -315,12 +392,18 @@ if (checkoutForm) {
 
             setTimeout(() => {
                 closeCheckout();
-                // 恢復按鈕原狀
+                // 恢復按鈕原狀與清空購物車
                 setTimeout(() => {
                     btn.disabled = false;
                     btn.innerHTML = originalText;
                     btn.classList.replace('from-green-500', 'from-indigo-600');
                     btn.classList.replace('to-green-600', 'to-blue-600');
+
+                    // 清空實務上的購物車內容
+                    window.cart.items = [];
+                    renderCartUI();
+                    document.getElementById('checkout-form').reset();
+
                     alert(`✅ 您的訂單已經自動傳送給餐廳與附近的跑腿師傅！\n\n感謝您的訂購！師傅接單後會用電話與您聯絡。`);
                 }, 400);
             }, 1000);
