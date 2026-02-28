@@ -36,25 +36,49 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
+console.log("App Version: 2.0.1 - Security Update");
+
 // ==========================================
-// 3. 初始化與身份監聽
+// 3. 初始化與身份監聽 (加強穩定性)
 // ==========================================
 async function init() {
+    console.log("初始化開始...");
     showLoading();
 
-    // 1. 先確認目前是否有 Session (避免 onAuthStateChanged 的延遲)
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session) {
-        currentUser = session.user;
-        await loadUserProfile();
-        showMainUI();
-    } else {
-        showLoginUI();
+    // Fail-safe: 如果 5 秒後還在轉圈圈，強行關閉它
+    setTimeout(() => {
+        if (!loadingOverlay.classList.contains('hidden')) {
+            console.warn("載入超時，強制關閉 Overlay");
+            hideLoading();
+        }
+    }, 5000);
+
+    try {
+        // 1. 先確認目前是否有 Session
+        console.log("正在檢查 Session...");
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+
+        if (sessionError) throw sessionError;
+
+        if (session) {
+            console.log("偵測到已登入帳號:", session.user.email);
+            currentUser = session.user;
+            await loadUserProfile();
+            showMainUI();
+        } else {
+            console.log("未登入，切換至登入模式");
+            showLoginUI();
+        }
+    } catch (e) {
+        console.error("初始化發生致命錯誤:", e);
+        showLoginUI(); // 報錯也強行跳到登入，讓使用者至少能看到介面
+    } finally {
+        hideLoading();
     }
-    hideLoading();
 
     // 2. 監聽後續的 Auth 狀態變化
     supabaseClient.auth.onAuthStateChanged(async (event, session) => {
+        console.log("Auth 狀態變更:", event);
         if (event === 'SIGNED_IN' && session) {
             showLoading();
             currentUser = session.user;
