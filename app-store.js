@@ -90,8 +90,8 @@ function renderStores(stores) {
                         <div class="font-bold text-gray-800 leading-tight mb-1 text-sm">${item.item_name}</div>
                         <div class="flex justify-between items-end mt-2">
                             <div class="text-indigo-600 font-black">$${item.price}</div>
-                            <!-- 將店家專屬的 LINE 網址帶入 orderNow 參數中 -->
-                            <button onclick="orderNow('${store.name}', '${item.item_name}', ${item.price}, '${store.contact_url || ''}')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded-full transition shadow-sm">想吃</button>
+                            <!-- 呼叫下單彈窗模組，傳入店家ID與餐點資訊 -->
+                            <button onclick="orderNow('${store.id}', '${store.name}', '${item.item_name}', ${item.price})" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded-full transition shadow-sm">想吃</button>
                         </div>
                     </div>
                 </div>
@@ -104,37 +104,100 @@ function renderStores(stores) {
     storeListContainer.innerHTML = html;
 }
 
-// 與店家直接聯繫點餐功能
-window.orderNow = function (restaurantName, itemName, price, contactUrl) {
-    const message = `老闆你好，我想向【${restaurantName}】點餐：\n👉 ${itemName} ($${price})\n請問目前可以接單與外送嗎？`;
+// ------------------------------------------
+// 顧客直購與自動派單系統核心邏輯
+// ------------------------------------------
 
-    if (contactUrl && contactUrl.trim() !== '') {
-        // 如果店家已經設定了聯絡網址 (如 line://ti/p/... 或 https://line.me/ti/p/...) 
-        // 嘗試將點單文字帶入 LINE 的 URL Scheme 中
-        alert("即將為您跳轉至商家的 LINE 進行點餐協調...");
+// 1. 開啟結帳小視窗
+window.orderNow = function (restaurantId, restaurantName, itemName, price) {
+    document.getElementById('checkout-restaurant-id').value = restaurantId;
+    document.getElementById('checkout-item-name').value = itemName;
+    document.getElementById('checkout-price').value = price;
 
-        let finalUrl = contactUrl;
+    document.getElementById('checkout-restaurant-name').textContent = restaurantName;
+    document.getElementById('checkout-item-display').textContent = itemName;
+    document.getElementById('checkout-price-display').textContent = '$' + price;
 
-        // 特判 LINE 官方帳號的開窗傳訊
-        if (contactUrl.includes('line.me') || contactUrl.includes('line://')) {
-            // LINE Scheme 夾帶文字的標準做法: line://msg/text/?{encodedMessage}
-            // 但如果店家給的是加好友網址，仍以加好友為主，客人手動貼上。這裡折衷，若是網址直接跳轉。
-            finalUrl = contactUrl;
-        }
+    document.getElementById('checkout-error').classList.add('hidden');
+    document.getElementById('checkout-modal').classList.remove('hidden');
 
-        // 幫客人把要講的話複製到剪貼簿，以便跳轉後直接貼上給店家
-        try {
-            navigator.clipboard.writeText(message);
-        } catch (e) {
-            console.log("複製剪貼簿失敗", e);
-        }
-
-        window.location.href = finalUrl;
-    } else {
-        // 店家未填寫網址
-        alert("⚠️ 該店家尚未設定快速聯絡的 LINE ID。\n\n請以截圖或自行聯絡店家：\n" + message);
-    }
+    // 小動畫延遲
+    setTimeout(() => {
+        document.getElementById('checkout-modal-content').classList.remove('translate-y-full');
+    }, 10);
 };
+
+// 2. 關閉結帳小視窗
+window.closeCheckout = function () {
+    document.getElementById('checkout-modal-content').classList.add('translate-y-full');
+    setTimeout(() => {
+        document.getElementById('checkout-modal').classList.add('hidden');
+        document.getElementById('checkout-form').reset();
+    }, 300);
+};
+
+// 3. 綁定送出表單事件與 API 寫入
+const checkoutForm = document.getElementById('checkout-form');
+if (checkoutForm) {
+    checkoutForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const restaurantId = document.getElementById('checkout-restaurant-id').value;
+        const itemName = document.getElementById('checkout-item-name').value;
+        const price = Number(document.getElementById('checkout-price').value);
+        const phone = document.getElementById('checkout-phone').value;
+        const address = document.getElementById('checkout-address').value;
+        const note = document.getElementById('checkout-note').value;
+
+        const btn = document.getElementById('checkout-submit-btn');
+        const errorMsg = document.getElementById('checkout-error');
+
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '🕒 正在為您建立訂單並呼叫外送員...';
+        errorMsg.classList.add('hidden');
+
+        // 組合訂單描述
+        let description = `[顧客直購] 餐點: ${itemName} | 電話: ${phone} | 送達: ${address}`;
+        if (note.trim()) {
+            description += ` | 備註: ${note}`;
+        }
+
+        try {
+            // 寫入到 jobs 表做為 pending 外送單
+            const { error: dbError } = await supabaseClient.from('jobs').insert([{
+                restaurant_id: restaurantId,
+                description: description,
+                total_amount: price
+            }]);
+
+            if (dbError) throw dbError;
+
+            btn.innerHTML = '✅ 訂單已成功送出！';
+            btn.classList.replace('from-indigo-600', 'from-green-500');
+            btn.classList.replace('to-blue-600', 'to-green-600');
+
+            setTimeout(() => {
+                closeCheckout();
+                // 恢復按鈕原狀
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                    btn.classList.replace('from-green-500', 'from-indigo-600');
+                    btn.classList.replace('to-green-600', 'to-blue-600');
+                    alert(`✅ 您的訂單已經自動傳送給餐廳與附近的跑腿師傅！\n\n感謝您的訂購！師傅接單後會用電話與您聯絡。`);
+                }, 400);
+            }, 1000);
+
+        } catch (err) {
+            console.error("下單錯誤:", err);
+            errorMsg.classList.remove('hidden');
+            errorMsg.textContent = "下單失敗，可能有權限阻擋: " + err.message;
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    });
+}
 
 // 進入點
 initStore();
