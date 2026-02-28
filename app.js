@@ -36,7 +36,7 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
-console.log("App Version: 2.0.5 - Ultimate Safe Mode");
+console.log("App Version: 2.0.6 - Debugger Edition");
 
 // ==========================================
 // 0. 故障保險 (Failsafe Watchdog) - 移至最頂層確保優先執行
@@ -225,10 +225,28 @@ async function handleLogin(e) {
     const errorMsg = document.getElementById('login-error');
 
     showLoading();
-    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    try {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
-    if (error) {
-        errorMsg.textContent = "登入失敗：" + error.message;
+        if (error) {
+            console.error("Supabase 原始登入錯誤:", error);
+            errorMsg.innerHTML = `
+                <b>拒絕訪問：</b><br>
+                錯誤類型: ${error.name}<br>
+                詳細原因: ${error.message}<br>
+                HTTP 狀態碼: ${error.status || '無'}<br>
+                <span class="text-xs text-gray-500 mt-2 block">如果出現 Invalid login credentials，請確認：<br>1. 密碼是否完全正確<br>2. 該帳戶是否已建立</span>
+            `;
+            errorMsg.classList.remove('hidden');
+            hideLoading();
+            return;
+        }
+
+        // 登入成功的話，剩下的交給 auth.onAuthStateChanged 來接手
+        console.log("登入 API 請求成功！等待 auth 狀態改變...");
+    } catch (err) {
+        console.error("登入函式發生意外錯誤:", err);
+        errorMsg.textContent = "意外的客戶端錯誤: " + err.message;
         errorMsg.classList.remove('hidden');
         hideLoading();
     }
