@@ -348,12 +348,24 @@ async function handleLogin(e) {
         if (error) {
             console.error("Supabase 原始登入錯誤:", error);
             errorMsg.className = "text-center text-sm mt-4 text-red-500 bg-red-50 p-2 rounded";
-            errorMsg.innerHTML = `
-                <b>[API 拒絕]</b><br>
-                錯誤類型: ${error.name}<br>
-                詳細原因: ${error.message}<br>
-                狀態碼: ${error.status || '無'}
-            `;
+
+            if (error.message.includes('Email not confirmed')) {
+                errorMsg.innerHTML = `
+                    <b>[請關閉 Email 驗證]</b><br>
+                    您的帳號已成功註冊，但 Supabase 預設要求點擊信件內連結驗證 Email 才能登入。<br>
+                    若不想寄信驗證，請至 Supabase 後台：<br>
+                    Authentication -> Providers -> Email<br>
+                    將 <b>Confirm email</b> 關閉即可！
+                `;
+            } else {
+                errorMsg.innerHTML = `
+                    <b>[API 拒絕]</b><br>
+                    錯誤類型: ${error.name}<br>
+                    詳細原因: ${error.message}<br>
+                    狀態碼: ${error.status || '無'}
+                `;
+            }
+
             hideLoading();
             return;
         }
