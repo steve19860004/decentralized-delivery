@@ -36,100 +36,115 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
-console.log("App Version: 2.0.4 - Absolute Loading Fix");
+console.log("App Version: 2.0.5 - Ultimate Safe Mode");
 
 // ==========================================
-// 0. 故障保險 (Failsafe Watchdog)
+// 0. 故障保險 (Failsafe Watchdog) - 移至最頂層確保優先執行
 // ==========================================
-// 隨時監控，如果加載畫面轉超過 4 秒，不論什麼情況都強行關閉。
-setInterval(() => {
-    if (loadingOverlay && !loadingOverlay.classList.contains('hidden')) {
-        const now = Date.now();
-        if (!window._loadingStartTime) window._loadingStartTime = now;
-        if (now - window._loadingStartTime > 4000) {
-            console.warn("偵測到加載鎖死，觸發自救機制強行解鎖...");
-            hideLoading();
+document.addEventListener("DOMContentLoaded", function () {
+    console.log("DOM 載入完成，啟動 Watchdog...");
+    setInterval(function () {
+        var loadingObj = document.getElementById('loading-overlay');
+        if (loadingObj && !loadingObj.classList.contains('hidden')) {
+            var now = Date.now();
+            if (!window._loadingStartTime) window._loadingStartTime = now;
+            if (now - window._loadingStartTime > 4000) {
+                console.warn("Watchdog 觸發：強制關閉加載遮罩！");
+                loadingObj.classList.add('hidden');
+                window._loadingStartTime = null;
+
+                // 如果還在初始狀態，強行顯示登入框
+                var loginObj = document.getElementById('login-view');
+                if (loginObj && loginObj.classList.contains('hidden')) {
+                    loginObj.classList.remove('hidden');
+                }
+            }
+        } else {
             window._loadingStartTime = null;
         }
-    } else {
-        window._loadingStartTime = null;
-    }
-}, 500);
+    }, 500);
+});
 
 // ==========================================
-// 3. 初始化與身份監聽 (簡化為單一流向)
+// 3. 初始化與身份監聽 (超級容錯版)
 // ==========================================
 async function init() {
-    console.log("正在進入系統部署與初始化...");
+    console.log("系統初始化...");
     showLoading();
 
-    // 監聽所有 Auth 變更
-    supabaseClient.auth.onAuthStateChanged(async (event, session) => {
-        console.log(`Auth 回調: ${event}`);
+    try {
+        // 監聽所有 Auth 變更 (不依賴深層解構)
+        supabaseClient.auth.onAuthStateChanged(async (event, session) => {
+            console.log("Auth 回調觸發:", event);
 
-        try {
-            if (session) {
-                currentUser = session.user;
-                console.log("登入確認成功:", currentUser.email);
+            try {
+                if (session && session.user) {
+                    currentUser = session.user;
+                    console.log("登入狀態確認:", currentUser.email);
 
-                try {
-                    await loadUserProfile();
-                } catch (e) {
-                    console.error("讀取 Profile 異常:", e);
-                    // 災難恢復：如果是 Steve 大，給予緊急權限
-                    if (currentUser.email === 'steve19860004@gmail.com') {
-                        profile = { name: 'Steve (緊急進入模式)', role: 'admin', id: 'emergency' };
-                    } else {
-                        profile = { name: currentUser.email, role: 'none', id: 'temp' };
+                    // 安全獲取 Profile
+                    try {
+                        const res = await supabaseClient.from('profiles').select('*').eq('user_id', currentUser.id).single();
+                        if (res.error) {
+                            console.warn("Profile 查詢出現問題:", res.error.message);
+                            throw res.error; // 故意丟出讓外部 catch 捕捉
+                        } else if (res.data) {
+                            profile = res.data;
+                            console.log("Profile 載入成功:", profile.role);
+                        } else {
+                            throw new Error("無資料回傳");
+                        }
+                    } catch (e) {
+                        console.error("查無 Profile 或發生錯誤:", e);
+                        if (currentUser.email === 'steve19860004@gmail.com') {
+                            profile = { name: 'Steve (緊急進入模式)', role: 'admin', id: 'emergency' };
+                        } else {
+                            profile = { name: currentUser.email, role: 'none', id: 'temp' };
+                        }
                     }
+
                     updateRoleSelect();
+                    showMainUI();
+                } else {
+                    console.log("未登入或已登出");
+                    currentUser = null;
+                    profile = null;
+                    showLoginUI();
                 }
-
-                showMainUI();
-            } else {
-                currentUser = null;
-                profile = null;
+            } catch (innerErr) {
+                console.error("Auth 邏輯執行錯誤:", innerErr);
                 showLoginUI();
+            } finally {
+                hideLoading();
             }
-        } catch (globalErr) {
-            console.error("Auth 嚴重初始化錯誤:", globalErr);
-            showLoginUI();
-        } finally {
-            hideLoading();
-        }
-    });
-
-    // 綁定基礎事件
-    loginForm.addEventListener('submit', handleLogin);
-    logoutBtn.addEventListener('click', handleLogout);
-    roleSelect.addEventListener('change', handleRoleSwitch);
-    orderForm.addEventListener('submit', handleNewOrder);
-    orderAmount.addEventListener('input', calculatePreview);
-    if (adminAddUserForm) adminAddUserForm.addEventListener('submit', handleAdminAddUser);
-
-    calculatePreview();
-}
-
-async function loadUserProfile() {
-    console.log("獲取身分資料中...");
-    const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .single();
-
-    if (error) {
-        console.warn("Profile 獲取失敗:", error.message);
-        throw error; // 交給 init 處理
+        });
+    } catch (outerErr) {
+        console.error("無法綁定 Auth 監聽器:", outerErr);
+        showLoginUI();
+        hideLoading();
     }
 
-    profile = data;
-    updateRoleSelect();
+    // 綁定基礎事件
+    try {
+        if (loginForm) loginForm.addEventListener('submit', handleLogin);
+        if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+        if (roleSelect) roleSelect.addEventListener('change', handleRoleSwitch);
+        if (orderForm) orderForm.addEventListener('submit', handleNewOrder);
+        if (orderAmount) orderAmount.addEventListener('input', calculatePreview);
+        if (adminAddUserForm) adminAddUserForm.addEventListener('submit', handleAdminAddUser);
+        calculatePreview();
+    } catch (eventErr) {
+        console.error("事件綁定失敗:", eventErr);
+    }
 }
 
 function updateRoleSelect() {
+    if (!roleSelect) return;
     roleSelect.innerHTML = '';
     const roles = [];
+
+    // 安全檢查
+    if (!profile) profile = { role: 'none', name: '未知' };
 
     // 檢查角色
     if (profile.role === 'admin') {
