@@ -18,16 +18,49 @@
     <!-- 頂部導覽列與身份切換 -->
     <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center">
         <h1 class="text-xl font-bold">品勝外送協議</h1>
-        <div>
-            <label for="role-select" class="text-sm mr-2">當前身份:</label>
-            <select id="role-select"
-                class="text-gray-900 bg-white rounded p-1 text-sm border-none shadow-sm focus:ring">
-                <!-- 選項會由 JS 動態載入 -->
-            </select>
+        <div class="flex items-center gap-3">
+            <div id="role-display" class="hidden text-sm">
+                <label for="role-select" class="mr-1">身份:</label>
+                <select id="role-select"
+                    class="text-gray-900 bg-white rounded p-1 text-sm border-none shadow-sm focus:ring">
+                </select>
+            </div>
+            <button id="logout-btn"
+                class="hidden text-xs bg-red-500 hover:bg-red-600 px-2 py-1 rounded transition">登出</button>
         </div>
     </header>
 
     <main class="p-4 max-w-md mx-auto h-[calc(100vh-70px)] overflow-y-auto pb-20">
+
+        <!-- ========================================== -->
+        <!-- 登入視圖 (Login View) -->
+        <!-- ========================================== -->
+        <section id="login-view" class="animate-fade-in py-10">
+            <div class="bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
+                <div class="text-center mb-8">
+                    <div class="text-5xl mb-3">🛡️</div>
+                    <h2 class="text-2xl font-black text-gray-800">安全登入</h2>
+                    <p class="text-gray-500 text-sm mt-1">請輸入您的帳號密碼以開始操作</p>
+                </div>
+                <form id="login-form" class="space-y-5">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email</label>
+                        <input type="email" id="login-email" required placeholder="example@pingsheng.com"
+                            class="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">密碼</label>
+                        <input type="password" id="login-password" required placeholder="••••••••"
+                            class="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition">
+                    </div>
+                    <button type="submit"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-200 transition transform active:scale-95">
+                        立即登入
+                    </button>
+                </form>
+                <p id="login-error" class="text-red-500 text-xs text-center mt-4 hidden"></p>
+            </div>
+        </section>
 
         <!-- ========================================== -->
         <!-- 餐廳端視圖 (Restaurant View) -->
@@ -136,6 +169,51 @@
             <h3 class="font-bold text-gray-700 mb-2 border-b pb-1">✅ 我完成的訂單</h3>
             <div id="master-history" class="space-y-3">
                 <!-- 師傅歷史訂單由 JS 載入 -->
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- 管理員視圖 (Admin View) -->
+        <!-- ========================================== -->
+        <section id="admin-view" class="hidden animate-fade-in">
+            <h2 class="text-2xl font-bold mb-4 flex items-center gap-2">
+                <span>⚙️</span> 平台管理中心
+            </h2>
+
+            <!-- 新增成員表單 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 mb-8">
+                <h3 class="font-bold text-gray-700 mb-4 flex items-center gap-2">
+                    <span>👤</span> 新增店家或師傅
+                </h3>
+                <form id="admin-add-user" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">電子郵件 (Email)</label>
+                        <input type="email" id="new-user-email" required placeholder="user@example.com"
+                            class="w-full p-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">顯示名稱 (Name)</label>
+                        <input type="text" id="new-user-name" required placeholder="例如：林師傅 / 好好味餐廳"
+                            class="w-full p-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">分配角色 (Role)</label>
+                        <select id="new-user-role" class="w-full p-2 border border-gray-300 rounded-lg">
+                            <option value="master">🛵 外送師傅 (Master)</option>
+                            <option value="restaurant">🏪 合作餐廳 (Restaurant)</option>
+                        </select>
+                    </div>
+                    <button type="submit"
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg shadow transition">
+                        建立權限並寄送邀請
+                    </button>
+                    <p id="admin-msg" class="text-xs text-center mt-2"></p>
+                </form>
+            </div>
+
+            <h3 class="font-bold text-gray-700 mb-2 border-b pb-1">📋 全平台人員名單</h3>
+            <div id="admin-user-list" class="space-y-2">
+                <!-- 管理員查看的人員列表 -->
             </div>
         </section>
 

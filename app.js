@@ -1,140 +1,143 @@
 /**
- * 品勝去中心化外送協議 (TMA) - 前端核心邏輯
+ * 品勝去中心化外送協議 (TMA) - 前端核心邏輯 (Auth 加強版)
  */
 
-// ==========================================
-// 1. Supabase 初始化設定 (請替換為您的真實憑證)
-// ==========================================
-// 根據使用者提供的截圖與說明，您可以在 Project Settings -> API 中找到這兩個值：
-// URL = Project URL
-// KEY = Publishable key (sb_publishable_...) 
 const SUPABASE_URL = 'https://uaiqyaevuzescywylefo.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhaXF5YWV2dXplc2N5d3lsZWZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxOTI0MzYsImV4cCI6MjA4Nzc2ODQzNn0.DBzQDYg7Ff0oNeHEVgGwHDVUwBOn3E19P240lisQciI';
 
-
-
-// === 預設模式（為了讓您不填入也能看到純畫面，如果不填正確會切換為假資料預覽模式） ===
-let supabaseClient = null;
-let isDemoMode = false;
-
-try {
-    if (SUPABASE_URL.startsWith('http')) {
-        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    } else {
-        isDemoMode = true;
-        console.warn("未偵測到真實 Supabase 憑證，進入 UI 預覽模式");
-    }
-} catch (e) {
-    console.error(e);
-    isDemoMode = true;
-}
-
+let supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ==========================================
-// 2. 狀態管理 (State)
+// 1. 狀態管理 (State)
 // ==========================================
-let currentUserId = null;
-let currentUserRole = null;
-let currentUserName = null;
+let currentUser = null; // Supabase Auth User
+let profile = null;      // 來自 profiles 表的詳細資料
 
 // ==========================================
-// 3. UI 元素綁定
+// 2. UI 元素綁定
 // ==========================================
-const roleSelect = document.getElementById('role-select');
+const loginView = document.getElementById('login-view');
 const restaurantView = document.getElementById('restaurant-view');
 const masterView = document.getElementById('master-view');
+const adminView = document.getElementById('admin-view');
 const loadingOverlay = document.getElementById('loading-overlay');
+const loginForm = document.getElementById('login-form');
+const logoutBtn = document.getElementById('logout-btn');
+const roleDisplay = document.getElementById('role-display');
+const roleSelect = document.getElementById('role-select');
 
-// 餐廳端元素
+// 餐廳端、師傅端與管理員端元素
 const orderForm = document.getElementById('order-form');
 const orderDesc = document.getElementById('order-desc');
 const orderAmount = document.getElementById('order-amount');
-const quickMenu = document.getElementById('quick-menu');
-const menuItems = document.getElementById('menu-items');
-const previewRes = document.getElementById('preview-res');
-const previewDrv = document.getElementById('preview-drv');
 const restaurantHistory = document.getElementById('restaurant-history');
-
-// 師傅端元素
-const masterScore = document.getElementById('master-score');
-const masterSuccessRate = document.getElementById('master-success-rate');
-const masterAvgRating = document.getElementById('master-avg-rating');
 const jobPool = document.getElementById('job-pool');
 const masterHistory = document.getElementById('master-history');
-
+const adminAddUserForm = document.getElementById('admin-add-user');
+const adminUserList = document.getElementById('admin-user-list');
 
 // ==========================================
-// 4. 初始化與載入
+// 3. 初始化與身份監聽
 // ==========================================
 async function init() {
     showLoading();
-    await loadProfiles();
-    hideLoading();
 
-    // 綁定事件
-    roleSelect.addEventListener('change', handleRoleChange);
-    orderForm.addEventListener('submit', handleNewOrder);
-    orderAmount.addEventListener('input', calculatePreview);
-}
-
-// 讀取 Supabase 的 Profiles 以供切換身份
-async function loadProfiles() {
-    if (isDemoMode) {
-        // 假資料預覽模式
-        populateRoleSelect([
-            { id: 'r1', name: '內湖老王牛肉麵', role: 'restaurant' },
-            { id: 'm1', name: '阿慶 (資深冷氣師傅)', role: 'master' }
-        ]);
-        return;
-    }
-
-    try {
-        const { data, error } = await supabaseClient
-            .from('profiles')
-            .select('id, name, role')
-            .order('role', { ascending: false }); // 讓 restaurant 排前面
-
-        if (error) throw error;
-        populateRoleSelect(data);
-
-    } catch (error) {
-        console.error('Error loading profiles:', error);
-        alert('無法載入使用者資料，請確認 Supabase 憑證是否正確！');
-    }
-}
-
-function populateRoleSelect(profiles) {
-    roleSelect.innerHTML = '';
-    profiles.forEach(p => {
-        const option = document.createElement('option');
-        option.value = p.id;
-        option.dataset.role = p.role;
-        option.dataset.name = p.name;
-        option.textContent = `${p.role === 'restaurant' ? '🏪' : '🛵'} ${p.name}`;
-        roleSelect.appendChild(option);
+    // 監聽 Auth 狀態變化
+    supabaseClient.auth.onAuthStateChanged(async (event, session) => {
+        if (session) {
+            currentUser = session.user;
+            await loadUserProfile();
+            showMainUI();
+        } else {
+            currentUser = null;
+            profile = null;
+            showLoginUI();
+        }
+        hideLoading();
     });
 
-    // 觸發初次載入
-    handleRoleChange();
+    // 綁定基礎事件
+    loginForm.addEventListener('submit', handleLogin);
+    logoutBtn.addEventListener('click', handleLogout);
+    roleSelect.addEventListener('change', handleRoleSwitch);
+    orderForm.addEventListener('submit', handleNewOrder);
+    orderAmount.addEventListener('input', calculatePreview);
+    if (adminAddUserForm) adminAddUserForm.addEventListener('submit', handleAdminAddUser);
+
+    calculatePreview();
+}
+
+async function loadUserProfile() {
+    const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .single();
+
+    if (!error && data) {
+        profile = data;
+        updateRoleSelect();
+    } else {
+        console.error("查無 Profile:", error);
+        profile = { name: currentUser.email, role: 'none' };
+        updateRoleSelect();
+    }
+}
+
+function updateRoleSelect() {
+    roleSelect.innerHTML = '';
+    const roles = [];
+
+    if (profile.role === 'admin') {
+        roles.push({ id: 'admin', name: '平台管理主控台', role: 'admin' });
+        roles.push({ id: 'restaurant_mode', name: '模擬餐廳操作', role: 'restaurant' });
+        roles.push({ id: 'master_mode', name: '模擬師傅操作', role: 'master' });
+    } else {
+        roles.push({ id: profile.id, name: profile.name, role: profile.role });
+    }
+
+    roles.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.role;
+        opt.textContent = `${r.role === 'admin' ? '🛡️' : (r.role === 'restaurant' ? '🏪' : '🛵')} ${r.name}`;
+        roleSelect.appendChild(opt);
+    });
 }
 
 // ==========================================
-// 5. 視圖切換與資料載入
+// 4. 視圖切換
 // ==========================================
-async function handleRoleChange() {
-    const selectedOption = roleSelect.options[roleSelect.selectedIndex];
-    currentUserId = selectedOption.value;
-    currentUserRole = selectedOption.dataset.role;
-    currentUserName = selectedOption.dataset.name;
+function showLoginUI() {
+    loginView.classList.remove('hidden');
+    restaurantView.classList.add('hidden');
+    masterView.classList.add('hidden');
+    adminView.classList.add('hidden');
+    roleDisplay.classList.add('hidden');
+    logoutBtn.classList.add('hidden');
+}
 
+function showMainUI() {
+    loginView.classList.add('hidden');
+    roleDisplay.classList.remove('hidden');
+    logoutBtn.classList.remove('hidden');
+    handleRoleSwitch();
+}
+
+async function handleRoleSwitch() {
+    const activeRole = roleSelect.value;
     showLoading();
 
-    if (currentUserRole === 'restaurant') {
-        masterView.classList.add('hidden');
+    restaurantView.classList.add('hidden');
+    masterView.classList.add('hidden');
+    adminView.classList.add('hidden');
+
+    if (activeRole === 'admin') {
+        adminView.classList.remove('hidden');
+        await loadAdminData();
+    } else if (activeRole === 'restaurant') {
         restaurantView.classList.remove('hidden');
         await loadRestaurantData();
-    } else if (currentUserRole === 'master') {
-        restaurantView.classList.add('hidden');
+    } else if (activeRole === 'master') {
         masterView.classList.remove('hidden');
         await loadMasterData();
     }
@@ -142,371 +145,172 @@ async function handleRoleChange() {
     hideLoading();
 }
 
-// --- 餐廳邏輯 ---
 // ==========================================
-// 4.5 餐廳菜單資料
+// 5. Auth Action
 // ==========================================
-const RESTAURANT_MENUS = {
-    // 內湖老王牛肉麵
-    '11111111-1111-1111-1111-111111111111': [
-        { name: '招牌紅燒牛肉麵', price: 180 },
-        { name: '清燉半筋半肉麵', price: 220 },
-        { name: '燙青菜', price: 40 },
-        { name: '綜合涼拌小菜', price: 60 }
-    ],
-    // 港墘路阿姨便當
-    '22222222-2222-2222-2222-222222222222': [
-        { name: '炸排骨飯', price: 110 },
-        { name: '滷雞腿飯', price: 120 },
-        { name: '雙主菜便當', price: 150 },
-        { name: '煎虱目魚肚', price: 130 }
-    ],
-    // 瑞光路健康餐盒
-    '33333333-3333-3333-3333-333333333333': [
-        { name: '舒肥雞胸溫沙拉', price: 160 },
-        { name: '鹽烤鮭魚花椰菜飯', price: 200 },
-        { name: '低GI牛腱餐盒', price: 180 }
-    ],
-    // Demo mode default
-    'r1': [
-        { name: '招牌紅燒牛肉麵', price: 180 },
-        { name: '燙青菜', price: 40 }
-    ]
-};
+async function handleLogin(e) {
+    e.preventDefault();
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    const errorMsg = document.getElementById('login-error');
 
-function loadMenu() {
-    // 若找不到對應 UUID 的菜單，預設給老王牛肉麵的菜單
-    const menu = RESTAURANT_MENUS[currentUserId] || RESTAURANT_MENUS['11111111-1111-1111-1111-111111111111'] || RESTAURANT_MENUS['r1'];
+    showLoading();
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
-    orderDesc.value = '';
-    orderAmount.value = '';
-    calculatePreview();
-
-    if (menu) {
-        quickMenu.classList.remove('hidden');
-        menuItems.innerHTML = menu.map(item => `
-            <button type="button" onclick="addMenuItem('${item.name}', ${item.price})" class="text-left bg-white border border-gray-200 p-2 rounded-lg hover:bg-blue-50 hover:border-blue-400 focus:bg-blue-50 transition drop-shadow-sm active:scale-95">
-                <div class="font-bold text-gray-800 text-sm truncate">${item.name}</div>
-                <div class="text-blue-600 font-bold">$${item.price}</div>
-            </button>
-        `).join('');
-    } else {
-        quickMenu.classList.add('hidden');
+    if (error) {
+        errorMsg.textContent = "登入失敗：" + error.message;
+        errorMsg.classList.remove('hidden');
+        hideLoading();
     }
 }
 
-window.addMenuItem = function (name, price) {
-    let currentDesc = orderDesc.value;
-    let currentAmount = Number(orderAmount.value) || 0;
+async function handleLogout() {
+    showLoading();
+    await supabaseClient.auth.signOut();
+}
 
-    if (currentDesc) {
-        orderDesc.value = currentDesc + ' + ' + name;
+// ==========================================
+// 6. 管理員功能 (Admin Logic)
+// ==========================================
+async function loadAdminData() {
+    const { data, error } = await supabaseClient.from('profiles').select('*').order('created_at', { ascending: false });
+    if (error) return;
+
+    adminUserList.innerHTML = data.map(u => `
+        <div class="bg-gray-50 p-3 rounded-lg flex justify-between items-center text-sm border border-gray-100 mb-2">
+            <div>
+                <div class="font-bold">${u.name}</div>
+                <div class="text-xs text-gray-500">${u.role}</div>
+            </div>
+            <div class="text-gray-400 text-xs">${new Date(u.created_at).toLocaleDateString()}</div>
+        </div>
+    `).join('');
+}
+
+async function handleAdminAddUser(e) {
+    e.preventDefault();
+    const email = document.getElementById('new-user-email').value;
+    const name = document.getElementById('new-user-name').value;
+    const role = document.getElementById('new-user-role').value;
+    const msg = document.getElementById('admin-msg');
+
+    msg.textContent = "正在發送邀請...";
+
+    // 註：這需要管理員權限
+    const { data, error } = await supabaseClient.auth.admin.createUser({
+        email: email,
+        password: 'pingsheng1234',
+        email_confirm: true,
+        user_metadata: { full_name: name, role: role }
+    });
+
+    if (error) {
+        msg.textContent = "失敗：" + error.message;
+        msg.className = "text-xs text-center mt-2 text-red-500";
     } else {
-        orderDesc.value = name;
+        await supabaseClient.from('profiles').insert([{ user_id: data.user.id, name, role }]);
+        msg.textContent = "成功建立！預設密碼為 pingsheng1234";
+        msg.className = "text-xs text-center mt-2 text-green-500";
+        loadAdminData();
     }
-
-    orderAmount.value = currentAmount + price;
-    calculatePreview();
 }
 
-window.clearMenu = function () {
-    orderDesc.value = '';
-    orderAmount.value = '';
-    calculatePreview();
-}
-
-function calculatePreview() {
-    const amount = Number(orderAmount.value) || 0;
-    // Pnet = amount * 0.97 (扣除 3% 金流)
-    const pNet = amount * 0.97;
-    previewRes.textContent = Math.floor(pNet * 0.75);
-    previewDrv.textContent = Math.floor(pNet * 0.20);
-}
-
+// ==========================================
+// 7. 業務邏輯
+// ==========================================
 async function handleNewOrder(e) {
     e.preventDefault();
+    if (!profile) return;
     const desc = orderDesc.value;
     const amount = Number(orderAmount.value);
 
-    if (isDemoMode) {
-        alert("UI 預覽模式：發單成功！（重新整理將會消失）");
-        orderForm.reset();
-        calculatePreview();
-        return;
-    }
-
     showLoading();
-    try {
-        const { error } = await supabaseClient
-            .from('jobs')
-            .insert([
-                { restaurant_id: currentUserId, description: desc, total_amount: amount }
-            ]);
+    const { error } = await supabaseClient.from('jobs').insert([
+        { restaurant_id: profile.id, description: desc, total_amount: amount }
+    ]);
 
-        if (error) throw error;
-
-        alert('✅ 訂單已發送到去中心化網路！');
+    if (error) alert('發佈失敗: ' + error.message);
+    else {
+        alert('✅ 訂單已發佈！');
         orderForm.reset();
-        calculatePreview();
-        await loadRestaurantData(); // 重新載入歷史
-    } catch (error) {
-        console.error('Error creating order:', error);
-        alert('發佈失敗: ' + error.message);
+        await loadRestaurantData();
     }
     hideLoading();
 }
 
 async function loadRestaurantData() {
-    loadMenu();
-
-    if (isDemoMode) {
-        restaurantHistory.innerHTML = `<div class="p-3 bg-white rounded-lg shadow-sm text-sm border-l-4 border-blue-500">
-            <div class="font-bold flex justify-between"><span>招牌牛肉麵 x 2</span><span class="text-blue-600">$400</span></div>
-            <div class="text-gray-500 mt-1 flex justify-between"><span>狀態: completed</span><span>阿慶 (資深冷氣師傅)</span></div>
-        </div>`;
-        return;
-    }
-
     const { data, error } = await supabaseClient
         .from('jobs')
-        .select(`
-            id, description, total_amount, status, created_at,
-            profiles!jobs_master_id_fkey(name)
-        `)
-        .eq('restaurant_id', currentUserId)
+        .select(`id, description, total_amount, status, created_at, profiles!jobs_master_id_fkey(name)`)
+        .eq('restaurant_id', profile.id)
         .order('created_at', { ascending: false });
 
-    if (error) {
-        console.error('Error loading history:', error);
-        return;
-    }
+    if (!error) renderRestaurantHistory(data);
+}
 
-    renderRestaurantHistory(data);
+async function loadMasterData() {
+    const { data: poolData } = await supabaseClient.from('jobs').select('*, profiles!jobs_restaurant_id_fkey(name)').eq('status', 'pending');
+    renderJobPool(poolData);
+
+    const { data: historyData } = await supabaseClient.from('jobs').select('*, profiles!jobs_restaurant_id_fkey(name)').eq('master_id', profile.id);
+    renderMasterHistory(historyData);
+}
+
+function calculatePreview() {
+    const amount = Number(document.getElementById('order-amount').value) || 0;
+    const pNet = amount * 0.97;
+    document.getElementById('preview-res').textContent = Math.floor(pNet * 0.75);
+    document.getElementById('preview-drv').textContent = Math.floor(pNet * 0.20);
 }
 
 function renderRestaurantHistory(jobs) {
-    if (!jobs || jobs.length === 0) {
-        restaurantHistory.innerHTML = '<div class="text-center text-gray-500 text-sm py-4">尚無訂單紀錄</div>';
-        return;
-    }
-
-    const html = jobs.map(j => {
-        const masterName = j.profiles ? j.profiles.name : '等待接單中...';
-        const statusMap = {
-            'pending': '<span class="text-yellow-600 bg-yellow-100 px-2 py-0.5 rounded text-xs ml-2">等待中</span>',
-            'accepted': '<span class="text-blue-600 bg-blue-100 px-2 py-0.5 rounded text-xs ml-2">運送中</span>',
-            'completed': '<span class="text-green-600 bg-green-100 px-2 py-0.5 rounded text-xs ml-2">已完工</span>'
-        };
-        const statusHtml = statusMap[j.status] || `<span class="text-gray-600 bg-gray-100 px-2 py-0.5 rounded text-xs ml-2">${j.status}</span>`;
-
-        return `
-        <div class="p-3 bg-white rounded-lg shadow-sm text-sm border-l-4 border-blue-500">
-            <div class="font-bold flex justify-between items-center">
-                <span>${j.description} ${statusHtml}</span>
-                <span class="text-blue-600 font-black">$${j.total_amount}</span>
-            </div>
-            <div class="text-gray-500 mt-1 flex justify-between">
-                <span>${new Date(j.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}</span>
-                <span>🛵 ${masterName}</span>
-            </div>
+    const container = document.getElementById('restaurant-history');
+    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 text-sm py-4">尚無訂單</div>'; return; }
+    container.innerHTML = jobs.map(j => `
+        <div class="p-3 bg-white rounded-lg shadow-sm text-sm border-l-4 border-blue-500 mb-2">
+            <div class="font-bold flex justify-between"><span>${j.description}</span><span class="text-blue-600">$${j.total_amount}</span></div>
+            <div class="text-xs text-gray-400 mt-1">${j.status} | 🛵 ${j.profiles ? j.profiles.name : '等待中'}</div>
         </div>
-        `;
-    }).join('');
-
-    restaurantHistory.innerHTML = html;
-}
-
-// --- 師傅邏輯 ---
-async function loadMasterData() {
-    if (isDemoMode) {
-        masterScore.textContent = '200';
-        masterSuccessRate.textContent = '100%';
-        masterAvgRating.innerHTML = '5.0 <span class="text-yellow-400">★</span>';
-        jobPool.innerHTML = `<div class="bg-white p-4 rounded-xl shadow-md border-2 border-indigo-100 job-card">
-            <div class="flex justify-between items-start mb-2">
-                <div>
-                    <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded mb-1 inline-block">新任務</span>
-                    <h4 class="font-bold text-lg">內湖老王牛肉麵</h4>
-                </div>
-                <div class="text-right">
-                    <div class="text-gray-500 text-xs">客戶實付</div>
-                    <div class="font-black text-xl text-gray-800">$400</div>
-                </div>
-            </div>
-            <div class="text-sm text-gray-700 mb-4 bg-gray-50 p-2 rounded">備註: 鍋燒麵 x1, 滷肉飯 x2</div>
-            <div class="flex items-center justify-between">
-                <div class="text-sm">跑此單淨賺: <span class="font-bold text-green-600 text-lg">$77</span></div>
-                <button onclick="alert('UI預覽模式')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition active:scale-95">馬上搶單</button>
-            </div>
-        </div>`;
-        return;
-    }
-
-    try {
-        // 1. 取得信用排名資料 (從 view 取得)
-        const { data: rankData, error: rankError } = await supabaseClient
-            .from('driver_reputation_ranking')
-            .select('*')
-            .eq('id', currentUserId)
-            .single();
-
-        if (rankError && rankError.code !== 'PGRST116') { // 無資料時不是錯誤，可能是真的完全沒單的新人
-            console.error('Error loading rank:', rankError);
-        } else if (rankData) {
-            masterScore.textContent = Number(rankData.reputation_score).toFixed(1);
-            masterSuccessRate.textContent = Number(rankData.success_rate).toFixed(0) + '%';
-            masterAvgRating.innerHTML = `${Number(rankData.avg_rating).toFixed(1)} <span class="text-yellow-400">★</span>`;
-        } else {
-            // 完全新人的預設顯示
-            masterScore.textContent = '150.0';
-            masterSuccessRate.textContent = '0%';
-            masterAvgRating.innerHTML = `5.0 <span class="text-yellow-400">★</span>`;
-        }
-
-        // 2. 獲取可接單任務 (狀態為 pending)
-        const { data: poolData, error: poolError } = await supabaseClient
-            .from('jobs')
-            .select(`
-                id, description, total_amount, created_at,
-                profiles!jobs_restaurant_id_fkey(name)
-            `)
-            .eq('status', 'pending')
-            .order('created_at', { ascending: false });
-
-        if (poolError) throw poolError;
-        renderJobPool(poolData);
-
-        // 3. 獲取歷史任務
-        const { data: historyData, error: historyError } = await supabaseClient
-            .from('jobs')
-            .select(`id, description, total_amount, status, created_at, profiles!jobs_restaurant_id_fkey(name)`)
-            .eq('master_id', currentUserId)
-            .order('created_at', { ascending: false });
-
-        if (historyError) throw historyError;
-        renderMasterHistory(historyData);
-
-    } catch (e) {
-        console.error("載入師傅資料失敗", e);
-    }
+    `).join('');
 }
 
 function renderJobPool(jobs) {
-    if (!jobs || jobs.length === 0) {
-        jobPool.innerHTML = `
-        <div class="text-center text-gray-500 py-8 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-            <div class="text-4xl mb-2">☕</div>
-            <p>目前內科無人發單</p>
-            <p class="text-xs mt-1">稍微休息一下，喝口水吧！</p>
-        </div>`;
-        return;
-    }
-
-    const html = jobs.map(j => {
-        const resName = j.profiles ? j.profiles.name : '未知餐廳';
-        // 計算這筆單師傅能賺多少 (20%)
-        const drvPayout = Math.floor(j.total_amount * 0.97 * 0.20);
-
-        return `
-        <div class="bg-white p-4 rounded-xl shadow border-2 border-indigo-100 job-card">
-            <div class="flex justify-between items-start mb-2">
-                <div>
-                    <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded mb-1 inline-block">新任務</span>
-                    <h4 class="font-bold text-lg">${resName}</h4>
-                </div>
-                <div class="text-right">
-                    <div class="text-gray-500 text-xs">客戶實付</div>
-                    <div class="font-black text-xl text-gray-800">$${j.total_amount}</div>
-                </div>
-            </div>
-            
-            <div class="text-sm text-gray-700 mb-4 bg-gray-50 p-2 rounded">
-                內容: ${j.description}
-            </div>
-            
-            <div class="flex items-center justify-between">
-                <div class="text-sm">跑此單淨賺: <span class="font-bold text-green-600 text-lg">$${drvPayout}</span></div>
-                <button onclick="acceptJob('${j.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition active:scale-95">
-                    马上搶單
-                </button>
-            </div>
-        </div>`;
-    }).join('');
-
-    jobPool.innerHTML = html;
+    const container = document.getElementById('job-pool');
+    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">無新任務</div>'; return; }
+    container.innerHTML = jobs.map(j => `
+        <div class="bg-white p-4 rounded-xl shadow border border-indigo-100 mb-3">
+            <div class="font-bold">${j.profiles ? j.profiles.name : '未知餐廳'} <span class="float-right text-indigo-600">$${j.total_amount}</span></div>
+            <div class="text-sm text-gray-600 my-2">${j.description}</div>
+            <button onclick="acceptJob('${j.id}')" class="w-full bg-indigo-600 text-white py-2 rounded-lg font-bold">馬上搶單</button>
+        </div>
+    `).join('');
 }
 
 function renderMasterHistory(jobs) {
-    if (!jobs || jobs.length === 0) {
-        masterHistory.innerHTML = '<div class="text-center text-gray-500 text-sm py-4">無歷史紀錄</div>';
-        return;
-    }
-
-    const html = jobs.map(j => {
-        const resName = j.profiles ? j.profiles.name : '餐廳';
-        return `
-        <div class="p-3 bg-white rounded-lg shadow-sm text-sm border-l-4 ${j.status === 'completed' ? 'border-green-500' : 'border-gray-400'}">
-            <div class="font-bold flex justify-between">
-                <span>${resName}</span>
-                <span class="text-green-600">$${Math.floor(j.total_amount * 0.97 * 0.2)} (報酬)</span>
-            </div>
-            <div class="text-gray-500 mt-1 flex justify-between items-center">
-                <span>${j.description}</span>
-                ${j.status === 'completed'
-                ? '<span class="text-green-600 bg-green-100 px-2 rounded text-xs">已結算</span>'
-                : '<button onclick="completeJob(\'' + j.id + '\')" class="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 shadow">標示為完工</button>'}
+    const container = document.getElementById('master-history');
+    if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">無接單紀錄</div>'; return; }
+    container.innerHTML = jobs.map(j => `
+        <div class="p-3 bg-white rounded-lg shadow-sm mb-2 border-l-4 ${j.status === 'completed' ? 'border-green-500' : 'border-orange-400'}">
+            <div class="font-bold flex justify-between"><span>${j.profiles ? j.profiles.name : '餐廳'}</span><span>$${Math.floor(j.total_amount * 0.19)}</span></div>
+            <div class="flex justify-between items-center mt-2">
+                <span class="text-xs text-gray-400">${j.description}</span>
+                ${j.status === 'accepted' ? `<button onclick="completeJob('${j.id}')" class="bg-green-500 text-white px-3 py-1 rounded text-xs">完工</button>` : `<span class="text-green-600 text-xs">已結算</span>`}
             </div>
         </div>
-        `;
-    }).join('');
-
-    masterHistory.innerHTML = html;
+    `).join('');
 }
 
+window.acceptJob = async function (id) {
+    const { error } = await supabaseClient.from('jobs').update({ status: 'accepted', master_id: profile.id }).eq('id', id).eq('status', 'pending');
+    if (error) alert("搶單失敗！可能是已被搶走或權限不足"); else loadMasterData();
+};
 
-// --- API Actions ---
-window.acceptJob = async function (jobId) {
-    if (!confirm("確定要接這單嗎？")) return;
+window.completeJob = async function (id) {
+    const { error } = await supabaseClient.from('jobs').update({ status: 'completed' }).eq('id', id);
+    if (error) alert("更新失敗！"); else loadMasterData();
+};
 
-    showLoading();
-    try {
-        const { error } = await supabaseClient
-            .from('jobs')
-            .update({ status: 'accepted', master_id: currentUserId })
-            .eq('id', jobId)
-            .eq('status', 'pending'); // 併發控制：確保只有它是 pending 才能搶到
-
-        if (error) throw error;
-        alert("🎉 搶單成功！請盡速前往餐廳。");
-        await loadMasterData();
-    } catch (e) {
-        alert("搶單失敗，可能已經被其他師傅搶走了！");
-    }
-    hideLoading();
-}
-
-window.completeJob = async function (jobId) {
-    if (!confirm("確定餐點已送達並完工嗎？（這將觸發後台分潤金流）")) return;
-
-    showLoading();
-    try {
-        const { error } = await supabaseClient
-            .from('jobs')
-            .update({ status: 'completed' })
-            .eq('id', jobId);
-
-        if (error) throw error;
-        alert("✅ 完工！這筆單的分潤已紀錄至去中心化帳本。");
-        await loadMasterData(); // 會觸發包含重新計算分數
-    } catch (e) {
-        alert("更新狀態失敗！");
-    }
-    hideLoading();
-}
-
-// Helpers
 function showLoading() { loadingOverlay.classList.remove('hidden'); }
 function hideLoading() { loadingOverlay.classList.add('hidden'); }
 
-// 啟動
 init();
