@@ -124,6 +124,18 @@ window.orderNow = function (restaurantId, restaurantName, itemName, price) {
     document.getElementById('checkout-price-display').textContent = '$' + price;
 
     document.getElementById('checkout-error').classList.add('hidden');
+
+    // 重置運費試算 UI 狀態
+    document.getElementById('checkout-fee-preview').classList.add('hidden');
+    document.getElementById('checkout-submit-btn').classList.add('hidden');
+    const calcBtn = document.getElementById('calc-fee-btn');
+    if (calcBtn) {
+        calcBtn.classList.remove('hidden');
+        calcBtn.disabled = false;
+        calcBtn.innerHTML = '🔍 預估運費';
+    }
+    window.currentDeliveryFee = 0; // 全域記錄
+
     document.getElementById('checkout-modal').classList.remove('hidden');
 
     // 小動畫延遲
@@ -150,6 +162,11 @@ window.updateQuantity = function (change) {
     qtyInput.value = newQty;
     qtyDisplay.textContent = newQty;
     totalPriceDisplay.textContent = '$' + (unitPrice * newQty);
+
+    // 支援動態更新含運總價
+    if (window.currentDeliveryFee !== undefined && !document.getElementById('checkout-fee-preview').classList.contains('hidden')) {
+        document.getElementById('preview-total').textContent = '$' + ((unitPrice * newQty) + window.currentDeliveryFee);
+    }
 };
 
 // 2. 關閉結帳小視窗
@@ -160,6 +177,85 @@ window.closeCheckout = function () {
         document.getElementById('checkout-form').reset();
     }, 300);
 };
+
+// 2.5 運費即時精算邏輯
+const calcFeeBtn = document.getElementById('calc-fee-btn');
+const addressInput = document.getElementById('checkout-address');
+
+if (calcFeeBtn && addressInput) {
+    // 點擊「預估運費」按鈕
+    calcFeeBtn.addEventListener('click', () => {
+        const dest = addressInput.value.trim();
+        const errorMsg = document.getElementById('checkout-error');
+
+        if (!dest) {
+            errorMsg.classList.remove('hidden');
+            errorMsg.textContent = "👆 請先輸入您的外送地址";
+            return;
+        }
+
+        errorMsg.classList.add('hidden');
+        calcFeeBtn.disabled = true;
+        calcFeeBtn.innerHTML = `<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700 inline-block align-middle mr-1"></div> 地圖路線規劃中...`;
+
+        // 呼叫 Google 地圖路線規劃
+        const service = new google.maps.DistanceMatrixService();
+        service.getDistanceMatrix({
+            origins: ['台北市信義區市府路1號'], // 測試用固定起點
+            destinations: [dest],
+            travelMode: 'DRIVING'
+        }, (response, status) => {
+            if (status === 'OK') {
+                const results = response.rows[0].elements;
+                if (results[0].status === 'OK') {
+                    const distanceText = results[0].distance.text;
+                    const distanceKm = results[0].distance.value / 1000;
+
+                    // 運用與 n8n 一模一樣的運費雙核重現
+                    let fee = 50;
+                    if (distanceKm > 2) {
+                        const extraKm = distanceKm - 2;
+                        fee += Math.ceil(extraKm / 0.5) * 10;
+                    }
+
+                    window.currentDeliveryFee = fee; // 暫存
+
+                    // 渲染至 UI 上
+                    document.getElementById('preview-distance').textContent = distanceText;
+                    document.getElementById('preview-fee').textContent = '+$' + fee;
+
+                    const foodTotal = Number(document.getElementById('checkout-quantity').value) * Number(document.getElementById('checkout-price').value);
+                    document.getElementById('preview-total').textContent = '$' + (foodTotal + fee);
+
+                    // 隱藏試算鈕，解鎖確認送出鈕
+                    calcFeeBtn.classList.add('hidden');
+                    document.getElementById('checkout-fee-preview').classList.remove('hidden');
+                    document.getElementById('checkout-submit-btn').classList.remove('hidden');
+
+                } else {
+                    errorMsg.classList.remove('hidden');
+                    errorMsg.textContent = "❌ 地圖無法辨識此地址，或找不到路線，請重新輸入。";
+                    calcFeeBtn.disabled = false;
+                    calcFeeBtn.innerHTML = '🔍 預估運費';
+                }
+            } else {
+                errorMsg.classList.remove('hidden');
+                errorMsg.textContent = "❌ 地圖服務暫時無回應，請稍後再試。 (" + status + ")";
+                calcFeeBtn.disabled = false;
+                calcFeeBtn.innerHTML = '🔍 預估運費';
+            }
+        });
+    });
+
+    // 如果輸入框被修改，立刻退回「未試算」的防呆狀態
+    addressInput.addEventListener('input', () => {
+        document.getElementById('checkout-fee-preview').classList.add('hidden');
+        document.getElementById('checkout-submit-btn').classList.add('hidden');
+        calcFeeBtn.classList.remove('hidden');
+        calcFeeBtn.disabled = false;
+        calcFeeBtn.innerHTML = '🔍 預估運費';
+    });
+}
 
 // 3. 綁定送出表單事件與 API 寫入
 const checkoutForm = document.getElementById('checkout-form');
@@ -179,6 +275,7 @@ if (checkoutForm) {
         const restaurantName = document.getElementById('checkout-restaurant-name').textContent;
 
         const btn = document.getElementById('checkout-submit-btn');
+        const originalText = btn.innerHTML;
         const errorMsg = document.getElementById('checkout-error');
 
         btn.disabled = true;
