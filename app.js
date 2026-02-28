@@ -76,19 +76,37 @@ async function init() {
         hideLoading();
     }
 
+    console.log("App Version: 2.0.2 - Post-Login Stability Fix");
+
     // 2. 監聽後續的 Auth 狀態變化
     supabaseClient.auth.onAuthStateChanged(async (event, session) => {
-        console.log("Auth 狀態變更:", event);
-        if (event === 'SIGNED_IN' && session) {
-            showLoading();
-            currentUser = session.user;
-            await loadUserProfile();
-            showMainUI();
-            hideLoading();
-        } else if (event === 'SIGNED_OUT') {
-            currentUser = null;
-            profile = null;
+        console.log("Auth 狀態變更事件:", event);
+
+        try {
+            if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+                showLoading();
+                currentUser = session.user;
+                console.log("登入成功，正在嘗試載入 Profile...");
+
+                try {
+                    await loadUserProfile();
+                } catch (profileErr) {
+                    console.error("載入 Profile 失敗，進入回退模式:", profileErr);
+                    profile = { name: currentUser.email, role: 'none' };
+                    updateRoleSelect();
+                }
+
+                showMainUI();
+            } else if (event === 'SIGNED_OUT') {
+                currentUser = null;
+                profile = null;
+                showLoginUI();
+            }
+        } catch (globalErr) {
+            console.error("Auth 監聽器發生全域錯誤:", globalErr);
             showLoginUI();
+        } finally {
+            hideLoading();
         }
     });
 
