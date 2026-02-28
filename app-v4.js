@@ -36,10 +36,10 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
-console.log("App Version: 2.0.7 - UI Tracer Edition");
+console.log("App Version: 2.0.8 - Active Sync Edition");
 
 // ==========================================
-// 0. 故障保險 (Failsafe Watchdog) - 移至最頂層確保優先執行
+// 0. 故障保險 (Failsafe Watchdog)
 // ==========================================
 document.addEventListener("DOMContentLoaded", function () {
     console.log("DOM 載入完成，啟動 Watchdog...");
@@ -48,12 +48,11 @@ document.addEventListener("DOMContentLoaded", function () {
         if (loadingObj && !loadingObj.classList.contains('hidden')) {
             var now = Date.now();
             if (!window._loadingStartTime) window._loadingStartTime = now;
-            if (now - window._loadingStartTime > 5000) {
+            if (now - window._loadingStartTime > 7000) { // 放寬到 7 秒
                 console.warn("Watchdog 觸發：強制關閉加載遮罩！");
                 loadingObj.classList.add('hidden');
                 window._loadingStartTime = null;
 
-                // 如果還在初始狀態，強行顯示登入框
                 var loginObj = document.getElementById('login-view');
                 if (loginObj && loginObj.classList.contains('hidden')) {
                     loginObj.classList.remove('hidden');
@@ -66,80 +65,29 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 // ==========================================
-// 3. 初始化與身份監聽 (超級容錯 + UI Tracer版)
+// 3. 初始化 (主動獲取版，放棄被動監聽)
 // ==========================================
 async function init() {
-    console.log("系統初始化...");
+    console.log("系統初始化 (主動狀態檢查)...");
     showLoading();
 
     try {
-        // 監聽所有 Auth 變更 (不依賴深層解構)
-        supabaseClient.auth.onAuthStateChanged(async (event, session) => {
-            const errorMsg = document.getElementById('login-error');
-            console.log("Auth 回調觸發:", event);
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
 
-            try {
-                if (session && session.user) {
-                    currentUser = session.user;
-                    if (errorMsg) {
-                        errorMsg.classList.remove('hidden');
-                        errorMsg.className = "text-center text-sm mt-4 text-green-700 font-bold bg-green-100 p-2 rounded";
-                        errorMsg.textContent = "3. [事件捕獲] 系統已確認身分！正在加載資料...";
-                    }
-                    console.log("登入狀態確認:", currentUser.email);
-
-                    // 安全獲取 Profile
-                    try {
-                        const res = await supabaseClient.from('profiles').select('*').eq('user_id', currentUser.id).single();
-                        if (res.error) {
-                            console.warn("Profile 查詢出現問題:", res.error.message);
-                            if (errorMsg) errorMsg.innerHTML += "<br>⚠️ Profile讀取失敗: " + res.error.message;
-                            throw res.error; // 故意丟出讓外部 catch 捕捉
-                        } else if (res.data) {
-                            profile = res.data;
-                            console.log("Profile 載入成功:", profile.role);
-                            if (errorMsg) errorMsg.innerHTML += "<br>✅ 資料加載完成！即將進入主控台...";
-                        } else {
-                            throw new Error("無資料回傳");
-                        }
-                    } catch (e) {
-                        console.error("查無 Profile 或發生錯誤:", e);
-                        // 緊急模式
-                        if (currentUser.email === 'steve19860004@gmail.com') {
-                            profile = { name: 'Steve (緊急進入模式)', role: 'admin', id: 'emergency' };
-                        } else {
-                            profile = { name: currentUser.email, role: 'none', id: 'temp' };
-                        }
-                    }
-
-                    updateRoleSelect();
-                    // 故意暫緩 1 秒讓使用者看進度文字
-                    setTimeout(() => {
-                        if (errorMsg) errorMsg.classList.add('hidden');
-                        showMainUI();
-                        hideLoading();
-                    }, 1000);
-                } else {
-                    console.log("未登入或已登出");
-                    currentUser = null;
-                    profile = null;
-                    showLoginUI();
-                    hideLoading();
-                }
-            } catch (innerErr) {
-                console.error("Auth 邏輯執行錯誤:", innerErr);
-                if (errorMsg) {
-                    errorMsg.classList.remove('hidden');
-                    errorMsg.className = "text-center text-sm mt-4 text-red-600 bg-red-100 p-2";
-                    errorMsg.innerHTML = "<b>[致命連動錯誤]</b><br>" + innerErr.message;
-                }
-                showLoginUI();
-                hideLoading();
-            }
-        });
-    } catch (outerErr) {
-        console.error("無法綁定 Auth 監聽器:", outerErr);
+        if (error) {
+            console.error("獲取初始 Session 失敗:", error);
+            showLoginUI();
+        } else if (session && session.user) {
+            console.log("發現既有登入 Session:", session.user.email);
+            await _performLoginFlow(session.user);
+        } else {
+            console.log("未登入狀態");
+            showLoginUI();
+        }
+    } catch (err) {
+        console.error("初始化嚴重錯誤:", err);
         showLoginUI();
+    } finally {
         hideLoading();
     }
 
@@ -157,15 +105,57 @@ async function init() {
     }
 }
 
+// 獨立的登入後連動流程 (供 init 與 handleLogin 共用)
+async function _performLoginFlow(user) {
+    const errorMsg = document.getElementById('login-error');
+    currentUser = user;
+
+    if (errorMsg) {
+        errorMsg.classList.remove('hidden');
+        errorMsg.className = "text-center text-sm mt-4 text-green-700 font-bold bg-green-100 p-2 rounded";
+        errorMsg.textContent = "3. [主動連動] 正在加載資料庫權限...";
+    }
+
+    try {
+        const res = await supabaseClient.from('profiles').select('*').eq('user_id', currentUser.id).single();
+        if (res.error) {
+            if (errorMsg) errorMsg.innerHTML += "<br>⚠️ Profile讀取失敗: " + res.error.message;
+            throw res.error;
+        } else if (res.data) {
+            profile = res.data;
+            if (errorMsg) errorMsg.innerHTML += "<br>✅ 資料加載完成！即將進入主控台...";
+        } else {
+            throw new Error("無資料回傳");
+        }
+    } catch (e) {
+        console.error("查無 Profile 或發生錯誤:", e);
+        // 緊急模式
+        if (currentUser.email === 'steve19860004@gmail.com') {
+            profile = { name: 'Steve (緊急進入模式)', role: 'admin', id: 'emergency' };
+        } else {
+            profile = { name: currentUser.email, role: 'none', id: 'temp' };
+        }
+    }
+
+    updateRoleSelect();
+
+    // 確保留一點時間讓使用者看到成功訊息
+    return new Promise(resolve => {
+        setTimeout(() => {
+            if (errorMsg) errorMsg.classList.add('hidden');
+            showMainUI();
+            resolve();
+        }, 1000);
+    });
+}
+
 function updateRoleSelect() {
     if (!roleSelect) return;
     roleSelect.innerHTML = '';
     const roles = [];
 
-    // 安全檢查
     if (!profile) profile = { role: 'none', name: '未知' };
 
-    // 檢查角色
     if (profile.role === 'admin') {
         roles.push({ val: 'admin', text: '🛡️ 平台管理主控台' });
         roles.push({ val: 'restaurant', text: '🏪 模擬餐廳操作' });
@@ -230,12 +220,12 @@ async function handleRoleSwitch() {
     } catch (err) {
         console.error("切換視圖發生錯誤:", err);
     } finally {
-        hideLoading(); // <--- 絕對會執行，不論成功或失敗
+        hideLoading();
     }
 }
 
 // ==========================================
-// 5. Auth Action (附帶狀態追蹤)
+// 5. Auth Action (暴力主動版)
 // ==========================================
 async function handleLogin(e) {
     e.preventDefault();
@@ -266,10 +256,11 @@ async function handleLogin(e) {
 
         // 登入 API 呼叫本身成功了！
         errorMsg.className = "text-center text-sm mt-4 text-green-600 font-bold bg-green-50 p-2 rounded";
-        errorMsg.textContent = "2. [API 同意] 憑證正確！正在等待系統連動...";
-        console.log("登入 API 請求成功！等待 auth 狀態改變...");
+        errorMsg.textContent = "2. [API 同意] 憑證正確！正在主動切換中...";
 
-        // 注意：不主動 hideLoading，交給 onAuthStateChanged
+        // 【核心修改】不等待 onAuthStateChanged，直接主動呼叫進入主畫面
+        await _performLoginFlow(data.user);
+        hideLoading();
     } catch (err) {
         console.error("登入函式發生意外錯誤:", err);
         errorMsg.className = "text-center text-sm mt-4 text-red-500";
@@ -281,6 +272,10 @@ async function handleLogin(e) {
 async function handleLogout() {
     showLoading();
     await supabaseClient.auth.signOut();
+    currentUser = null;
+    profile = null;
+    showLoginUI();
+    hideLoading();
 }
 
 // ==========================================
