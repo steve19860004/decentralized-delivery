@@ -114,8 +114,13 @@ window.orderNow = function (restaurantId, restaurantName, itemName, price) {
     document.getElementById('checkout-item-name').value = itemName;
     document.getElementById('checkout-price').value = price;
 
+    // 初始化數量為 1
+    document.getElementById('checkout-quantity').value = 1;
+    document.getElementById('checkout-quantity-display').textContent = 1;
+
     document.getElementById('checkout-restaurant-name').textContent = restaurantName;
     document.getElementById('checkout-item-display').textContent = itemName;
+    document.getElementById('checkout-unit-price').textContent = '$' + price;
     document.getElementById('checkout-price-display').textContent = '$' + price;
 
     document.getElementById('checkout-error').classList.add('hidden');
@@ -125,6 +130,24 @@ window.orderNow = function (restaurantId, restaurantName, itemName, price) {
     setTimeout(() => {
         document.getElementById('checkout-modal-content').classList.remove('translate-y-full');
     }, 10);
+};
+
+// 1.5 更新數量與計算總價
+window.updateQuantity = function (change) {
+    const qtyInput = document.getElementById('checkout-quantity');
+    const qtyDisplay = document.getElementById('checkout-quantity-display');
+    const unitPrice = Number(document.getElementById('checkout-price').value);
+    const totalPriceDisplay = document.getElementById('checkout-price-display');
+
+    let currentQty = parseInt(qtyInput.value) || 1;
+    let newQty = currentQty + change;
+
+    // 數量下限為 1
+    if (newQty < 1) newQty = 1;
+
+    qtyInput.value = newQty;
+    qtyDisplay.textContent = newQty;
+    totalPriceDisplay.textContent = '$' + (unitPrice * newQty);
 };
 
 // 2. 關閉結帳小視窗
@@ -144,7 +167,10 @@ if (checkoutForm) {
 
         const restaurantId = document.getElementById('checkout-restaurant-id').value;
         const itemName = document.getElementById('checkout-item-name').value;
-        const price = Number(document.getElementById('checkout-price').value);
+        const unitPrice = Number(document.getElementById('checkout-price').value);
+        const quantity = parseInt(document.getElementById('checkout-quantity').value) || 1;
+        const finalPrice = unitPrice * quantity;
+
         const phone = document.getElementById('checkout-phone').value;
         const address = document.getElementById('checkout-address').value;
         const note = document.getElementById('checkout-note').value;
@@ -158,7 +184,7 @@ if (checkoutForm) {
         errorMsg.classList.add('hidden');
 
         // 組合訂單描述
-        let description = `[顧客直購] 餐點: ${itemName} | 電話: ${phone} | 送達: ${address}`;
+        let description = `[顧客直購] 餐點: ${itemName} x ${quantity} | 電話: ${phone} | 送達: ${address}`;
         if (note.trim()) {
             description += ` | 備註: ${note}`;
         }
@@ -168,7 +194,7 @@ if (checkoutForm) {
             const { error: dbError } = await supabaseClient.from('jobs').insert([{
                 restaurant_id: restaurantId,
                 description: description,
-                total_amount: price
+                total_amount: finalPrice
             }]);
 
             if (dbError) throw dbError;
