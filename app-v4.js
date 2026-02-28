@@ -134,11 +134,17 @@ async function _performLoginFlow(user) {
         }
     } catch (e) {
         console.error("查無 Profile 或發生錯誤:", e);
-        // 緊急模式
+        // 緊急模式 (修正 invalid syntax for uuid 錯誤)
+        // 為了讓 Admin 可以正常執行 PostgreSQL (需要真實 UUID 格式寫入 restaurant_id)
         if (currentUser.email === 'steve19860004@gmail.com') {
-            profile = { name: 'Steve (緊急進入模式)', role: 'admin', id: 'emergency' };
+            profile = {
+                name: 'Steve (緊急管理模式)',
+                role: 'admin',
+                // 給一個全域 0 的合法 UUID，避免寫入 DB 崩潰
+                id: '00000000-0000-0000-0000-000000000000'
+            };
         } else {
-            profile = { name: currentUser.email, role: 'none', id: 'temp' };
+            profile = { name: currentUser.email, role: 'none', id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' };
         }
     }
 
