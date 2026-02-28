@@ -104,6 +104,10 @@ async function init() {
         const menuForm = document.getElementById('menu-form');
         if (menuForm) menuForm.addEventListener('submit', handleMenuSubmit);
 
+        // 綁定店家聯絡網址表單
+        const contactForm = document.getElementById('contact-form');
+        if (contactForm) contactForm.addEventListener('submit', handleContactSubmit);
+
         calculatePreview();
     } catch (eventErr) {
         console.error("事件綁定失敗:", eventErr);
@@ -338,6 +342,37 @@ async function handleAdminAddUser(e) {
 // ==========================================
 // 7. 業務邏輯與菜單管理
 // ==========================================
+async function handleContactSubmit(e) {
+    e.preventDefault();
+    if (!profile) return;
+
+    const urlInput = document.getElementById('contact-url-input');
+    const btn = document.getElementById('contact-submit-btn');
+    const newUrl = urlInput.value.trim();
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '儲存中...';
+
+    const { error } = await supabaseClient
+        .from('profiles')
+        .update({ contact_url: newUrl })
+        .eq('id', profile.id);
+
+    if (error) {
+        alert("儲存失敗: " + error.message);
+        btn.disabled = false;
+        btn.textContent = originalText;
+    } else {
+        profile.contact_url = newUrl; // 更新本地狀態
+        btn.textContent = '✅ 已儲存';
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }, 2000);
+    }
+}
+
 async function handleMenuSubmit(e) {
     e.preventDefault();
     if (!profile) return;
@@ -430,6 +465,12 @@ async function handleNewOrder(e) {
 }
 
 async function loadRestaurantData() {
+    // 0. 更新 UI 上的店家聯絡網址
+    const urlInput = document.getElementById('contact-url-input');
+    if (urlInput && profile) {
+        urlInput.value = profile.contact_url || '';
+    }
+
     // 1. 讀取並渲染訂單歷史
     const { data: jobsData, error: jobsError } = await supabaseClient
         .from('jobs')
