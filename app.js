@@ -42,18 +42,30 @@ const adminUserList = document.getElementById('admin-user-list');
 async function init() {
     showLoading();
 
-    // 監聽 Auth 狀態變化
+    // 1. 先確認目前是否有 Session (避免 onAuthStateChanged 的延遲)
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+        currentUser = session.user;
+        await loadUserProfile();
+        showMainUI();
+    } else {
+        showLoginUI();
+    }
+    hideLoading();
+
+    // 2. 監聽後續的 Auth 狀態變化
     supabaseClient.auth.onAuthStateChanged(async (event, session) => {
-        if (session) {
+        if (event === 'SIGNED_IN' && session) {
+            showLoading();
             currentUser = session.user;
             await loadUserProfile();
             showMainUI();
-        } else {
+            hideLoading();
+        } else if (event === 'SIGNED_OUT') {
             currentUser = null;
             profile = null;
             showLoginUI();
         }
-        hideLoading();
     });
 
     // 綁定基礎事件
