@@ -89,18 +89,25 @@
                     <input type="text" id="order-desc" required placeholder="請點擊上方選單或手動輸入..."
                         class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-gray-50">
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">客戶實付總額 ($)</label>
-                    <input type="number" id="order-amount" required placeholder="0"
-                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-bold text-lg text-blue-700 bg-gray-50">
+                <div class="flex gap-2">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">餐費 (本店實收)</label>
+                        <input type="number" id="order-food-amount" required placeholder="如: 150"
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-bold text-blue-700 bg-gray-50">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">外送費 (師傅全拿)</label>
+                        <input type="number" id="order-delivery-fee" required placeholder="如: 60"
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-bold text-green-700 bg-gray-50">
+                    </div>
                 </div>
                 <!-- 預覽分潤 -->
-                <div class="bg-blue-50 p-3 rounded-lg text-sm text-blue-800 border border-blue-100">
-                    <p>💡 此單發布後：</p>
-                    <ul class="list-disc list-inside mt-1 ml-1">
-                        <li>您 (餐廳) 將實收：<span id="preview-res" class="font-bold">0</span> 元 (75%)</li>
-                        <li>外送員將獲取：<span id="preview-drv" class="font-bold">0</span> 元 (20%)</li>
-                    </ul>
+                <div
+                    class="bg-blue-50 p-3 rounded-lg text-sm text-blue-800 border border-blue-100 flex justify-between items-center">
+                    <span class="font-bold">平台派單預覽：</span>
+                    <div class="text-right">
+                        <div>向客總收: <span id="preview-total" class="font-black text-lg text-blue-700">0</span></div>
+                    </div>
                 </div>
                 <button type="submit"
                     class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition transform active:scale-95">

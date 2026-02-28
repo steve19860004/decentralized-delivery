@@ -97,7 +97,11 @@ async function init() {
         if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
         if (roleSelect) roleSelect.addEventListener('change', handleRoleSwitch);
         if (orderForm) orderForm.addEventListener('submit', handleNewOrder);
-        if (orderAmount) orderAmount.addEventListener('input', calculatePreview);
+        // 綁定輸入即時計算預覽
+        const foodAmountBtn = document.getElementById('order-food-amount');
+        const deliveryFeeBtn = document.getElementById('order-delivery-fee');
+        if (foodAmountBtn) foodAmountBtn.addEventListener('input', calculatePreview);
+        if (deliveryFeeBtn) deliveryFeeBtn.addEventListener('input', calculatePreview);
         if (adminAddUserForm) adminAddUserForm.addEventListener('submit', handleAdminAddUser);
 
         // 綁定菜單上傳表單
@@ -448,11 +452,16 @@ async function handleNewOrder(e) {
     e.preventDefault();
     if (!profile) return;
     const desc = orderDesc.value;
-    const amount = Number(orderAmount.value);
+    const food = Number(document.getElementById('order-food-amount').value) || 0;
+    const delivery = Number(document.getElementById('order-delivery-fee').value) || 0;
+    const amount = food + delivery;
 
     showLoading();
+    // 把運費標註在訂單文字最後面
+    const finalDesc = `[餐廳發單] ${desc} | 運費: $${delivery}`;
+
     const { error } = await supabaseClient.from('jobs').insert([
-        { restaurant_id: profile.id, description: desc, total_amount: amount }
+        { restaurant_id: profile.id, description: finalDesc, total_amount: amount, delivery_fee: delivery }
     ]);
 
     if (error) alert('發佈失敗: ' + error.message);
@@ -474,7 +483,7 @@ async function loadRestaurantData() {
     // 1. 讀取並渲染訂單歷史
     const { data: jobsData, error: jobsError } = await supabaseClient
         .from('jobs')
-        .select(`id, description, total_amount, status, created_at, profiles!jobs_master_id_fkey(name)`)
+        .select(`id, description, total_amount, delivery_fee, status, created_at, profiles!jobs_master_id_fkey(name)`)
         .eq('restaurant_id', profile.id)
         .order('created_at', { ascending: false });
 
@@ -525,10 +534,11 @@ async function loadMasterData() {
 }
 
 function calculatePreview() {
-    const amount = Number(document.getElementById('order-amount').value) || 0;
-    const pNet = amount * 0.97;
-    document.getElementById('preview-res').textContent = Math.floor(pNet * 0.75);
-    document.getElementById('preview-drv').textContent = Math.floor(pNet * 0.20);
+    const food = Number(document.getElementById('order-food-amount')?.value) || 0;
+    const delivery = Number(document.getElementById('order-delivery-fee')?.value) || 0;
+    const previewTotal = document.getElementById('preview-total');
+
+    if (previewTotal) previewTotal.textContent = '$' + (food + delivery);
 }
 
 function renderRestaurantHistory(jobs) {
@@ -537,7 +547,10 @@ function renderRestaurantHistory(jobs) {
     container.innerHTML = jobs.map(j => `
         <div class="p-3 bg-white rounded-lg shadow-sm text-sm border-l-4 border-blue-500 mb-2">
             <div class="font-bold flex justify-between"><span>${j.description}</span><span class="text-blue-600">$${j.total_amount}</span></div>
-            <div class="text-xs text-gray-400 mt-1">${j.status} | 🛵 ${j.profiles ? j.profiles.name : '等待中'}</div>
+            <div class="text-xs text-gray-500 mt-1 flex justify-between">
+                <span>狀態: ${j.status} | 🛵 ${j.profiles ? j.profiles.name : '等待中'}</span>
+                <span>餐費:$${j.total_amount - (j.delivery_fee || 0)} / 運:$${j.delivery_fee || 0}</span>
+            </div>
         </div>
     `).join('');
 }
@@ -545,28 +558,33 @@ function renderRestaurantHistory(jobs) {
 function renderJobPool(jobs) {
     const container = document.getElementById('job-pool');
     if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">目前全區無新任務可以接取</div>'; return; }
-    container.innerHTML = jobs.map(j => `
+    container.innerHTML = jobs.map(j => {
+        const earning = j.delivery_fee > 0 ? j.delivery_fee : Math.floor(j.total_amount * 0.2);
+        return `
         <div class="bg-white p-4 rounded-xl shadow border border-indigo-100 mb-3 hover:shadow-md transition">
-            <div class="font-bold">${j.profiles ? j.profiles.name : '未知餐廳'} <span class="float-right text-indigo-600 font-extrabold">$${j.total_amount}</span></div>
+            <div class="font-bold">${j.profiles ? j.profiles.name : '未知餐廳'} <span class="float-right text-green-600 font-extrabold text-lg">賺 $${earning}</span></div>
+            <div class="text-xs font-bold text-gray-400 mt-1 mb-2">代收總額 (需向客收取): $${j.total_amount}</div>
             <div class="text-sm text-gray-600 my-2">${j.description}</div>
             <button onclick="acceptJob('${j.id}')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold transition">🚀 馬上搶單</button>
         </div>
-    `).join('');
+        `}).join('');
 }
 
 function renderMasterHistory(jobs) {
     const container = document.getElementById('master-history');
     if (!jobs || jobs.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-4">無接單紀錄，快去任務池看看吧！</div>'; return; }
-    container.innerHTML = jobs.map(j => `
+    container.innerHTML = jobs.map(j => {
+        const earning = j.delivery_fee > 0 ? j.delivery_fee : Math.floor(j.total_amount * 0.19);
+        return `
         <div class="p-3 bg-white rounded-lg shadow-sm mb-2 border-l-4 flex flex-col justify-between ${j.status === 'completed' ? 'border-green-500' : 'border-orange-400'}">
-            <div class="font-bold flex justify-between"><span>${j.profiles ? j.profiles.name : '餐廳'}</span><span>$${Math.floor(j.total_amount * 0.19)}</span></div>
+            <div class="font-bold flex justify-between"><span>${j.profiles ? j.profiles.name : '餐廳'}</span><span class="text-green-600">賺 $${earning}</span></div>
             <div class="text-xs text-gray-500 my-2">${j.description}</div>
             <div class="flex justify-between items-end mt-auto">
-                <span class="text-xs text-gray-400">系統單號：${j.id.substring(0, 8)}</span>
+                <span class="text-xs text-gray-400">總代收：$${j.total_amount}</span>
                 ${j.status === 'accepted' ? `<button onclick="completeJob('${j.id}')" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs transition font-bold shadow">✔ 標示完工</button>` : `<span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full text-xs font-bold border border-indigo-100">已結帳打單</span>`}
             </div>
         </div>
-    `).join('');
+        `}).join('');
 }
 
 window.acceptJob = async function (id) {
