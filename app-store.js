@@ -201,7 +201,7 @@ if (checkoutForm) {
                     description: orderDescription,
                     total_amount: finalPrice, // 只有餐費，運費將由 n8n 計算後 Update 回來
                     destination_address: address,
-                    restaurant_address: `台北市 ${restaurantName}`
+                    restaurant_address: '台北市信義區市府路1號' // 先用固定真實地址測試
                 }
             ]);
 
