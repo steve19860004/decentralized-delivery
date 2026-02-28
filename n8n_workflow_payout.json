@@ -1,0 +1,141 @@
+{
+  "name": "品勝去中心化外送協議 - 自動結帳與推播",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "supabase-webhook-checkout",
+        "options": {}
+      },
+      "id": "1e7cb774-8aa4-42b7-8da7-0f8dc137c352",
+      "name": "Supabase Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\\n  Supabase 傳來的 payload 會在 items[0].json.body.record 裡面\\n  包含：description, total_amount, restaurant_id, master_id等\\n*/\\n\\nconst record = $input.item.json.body.record;\\nconst totalAmount = Number(record.total_amount) || 0;\\n\\n// 計算利潤\\nconst pNet = totalAmount * 0.97; // 扣除綠界 3%\\nconst restaurantPayout = Math.floor(pNet * 0.75); // 餐廳 75%\\nconst driverPayout = Math.floor(pNet * 0.20); // 師傅 20%\\nconst platformFee = Math.floor(pNet * 0.02); // 品勝平台費 2%\\n\\nreturn {\\n  json: {\\n    job_id: record.id,\\n    restaurant_id: record.restaurant_id,\\n    master_id: record.master_id,\\n    total_amount: totalAmount,\\n    restaurant_payout: restaurantPayout,\\n    driver_payout: driverPayout,\\n    platform_fee: platformFee,\\n    description: record.description\\n  }\\n};"
+      },
+      "id": "cb1c750a-8bf8-466f-ae9e-1081523ff2a7",
+      "name": "計算分潤 (Code Node)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "5774344157",
+        "text": "={{'💰 品勝自動分潤報告 💰\\n訂單內容：' + $json.description + '\\n客戶實付：$' + $json.total_amount + '\\n\\n🏪 餐廳應收：$' + $json.restaurant_payout + '\\n🛵 師傅應收：$' + $json.driver_payout + '\\n📈 平台收入：$' + $json.platform_fee + '\\n\\n👉 帳務已寫入 Supabase 帳本。'}}",
+        "additionalFields": {}
+      },
+      "id": "426ad839-44fb-40db-be9a-9e126105c316",
+      "name": "Telegram 推播結果",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "ledger",
+        "columns": "job_id, restaurant_id, master_id, restaurant_payout, driver_payout, platform_fee_amount",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "job_id",
+              "fieldValue": "={{ $json.job_id }}"
+            },
+            {
+              "fieldId": "restaurant_id",
+              "fieldValue": "={{ $json.restaurant_id }}"
+            },
+            {
+              "fieldId": "master_id",
+              "fieldValue": "={{ $json.master_id }}"
+            },
+            {
+              "fieldId": "restaurant_payout",
+              "fieldValue": "={{ $json.restaurant_payout }}"
+            },
+            {
+              "fieldId": "driver_payout",
+              "fieldValue": "={{ $json.driver_payout }}"
+            },
+            {
+              "fieldId": "platform_fee_amount",
+              "fieldValue": "={{ $json.platform_fee }}"
+            }
+          ]
+        }
+      },
+      "id": "eb381fbc-8c38-4c28-9fa3-b6730aa1869f",
+      "name": "寫入 Supabase 帳本",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        640,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Supabase Webhook": {
+      "main": [
+        [
+          {
+            "node": "計算分潤 (Code Node)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "計算分潤 (Code Node)": {
+      "main": [
+        [
+          {
+            "node": "寫入 Supabase 帳本",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "寫入 Supabase 帳本": {
+      "main": [
+        [
+          {
+            "node": "Telegram 推播結果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "f907bede-1dfc-4573-b732-cbfaa2ebf250"
+}

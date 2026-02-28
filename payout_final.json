@@ -1,0 +1,137 @@
+{
+    "name": "去中心化外送分潤系統",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "supabase-webhook-checkout",
+                "responseMode": "onReceived",
+                "options": {}
+            },
+            "name": "Supabase Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ],
+            "webhookId": "supabase-webhook-checkout"
+        },
+        {
+            "parameters": {
+                "jsCode": "const record = $input.item.json.body.record;\nconst totalAmount = Number(record.total_amount) || 0;\n\nconst pNet = totalAmount * 0.97;\nconst restaurantPayout = Math.floor(pNet * 0.75);\nconst driverPayout = Math.floor(pNet * 0.20);\nconst platformFee = Math.floor(pNet * 0.02);\n\nreturn {\n  json: {\n    job_id: record.id,\n    restaurant_id: record.restaurant_id,\n    master_id: record.master_id,\n    total_amount: totalAmount,\n    restaurant_payout: restaurantPayout,\n    driver_payout: driverPayout,\n    platform_fee: platformFee,\n    description: record.description\n  }\n};"
+            },
+            "name": "計算分潤 (Code Node)",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "row",
+                "operation": "insert",
+                "table": "ledger",
+                "dataToSend": "defineBelow",
+                "fieldsUi": {
+                    "fieldValues": [
+                        {
+                            "fieldId": "job_id",
+                            "fieldValue": "={{ $json.job_id }}"
+                        },
+                        {
+                            "fieldId": "restaurant_payout",
+                            "fieldValue": "={{ $json.restaurant_payout }}"
+                        },
+                        {
+                            "fieldId": "driver_payout",
+                            "fieldValue": "={{ $json.driver_payout }}"
+                        },
+                        {
+                            "fieldId": "platform_profit",
+                            "fieldValue": "={{ $json.platform_fee }}"
+                        },
+                        {
+                            "fieldId": "total_amount",
+                            "fieldValue": "={{ $json.total_amount }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "寫入 Supabase 帳本",
+            "type": "n8n-nodes-base.supabase",
+            "typeVersion": 1,
+            "position": [
+                650,
+                300
+            ],
+            "credentials": {
+                "supabaseApi": {
+                    "id": "",
+                    "name": "Supabase account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "chatId": "5774344157",
+                "text": "={{'💰 品勝自動分潤報告 💰\\n訂單內容：' + $json.description + '\\n客戶實付：$' + $json.total_amount + '\\n\\n🏪 餐廳應收：$' + $json.restaurant_payout + '\\n🛵 師傅應收：$' + $json.driver_payout + '\\n📈 平台收入：$' + $json.platform_fee + '\\n\\n👉 帳務已寫入 Supabase 帳本。'}}",
+                "additionalFields": {}
+            },
+            "name": "Telegram 播報結果",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+                850,
+                300
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "",
+                    "name": "Telegram account"
+                }
+            }
+        }
+    ],
+    "pinData": {},
+    "connections": {
+        "Supabase Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "計算分潤 (Code Node)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "計算分潤 (Code Node)": {
+            "main": [
+                [
+                    {
+                        "node": "寫入 Supabase 帳本",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "寫入 Supabase 帳本": {
+            "main": [
+                [
+                    {
+                        "node": "Telegram 播報結果",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {}
+}
