@@ -36,81 +36,50 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
-console.log("App Version: 2.0.1 - Security Update");
+console.log("App Version: 2.0.3 - Final Auth Consolidation");
 
 // ==========================================
-// 3. 初始化與身份監聽 (加強穩定性)
+// 3. 初始化與身份監聽 (簡化為單一流向)
 // ==========================================
 async function init() {
-    console.log("初始化開始...");
+    console.log("系統初始化...");
     showLoading();
 
-    // Fail-safe: 如果 5 秒後還在轉圈圈，強行關閉它
-    setTimeout(() => {
-        if (!loadingOverlay.classList.contains('hidden')) {
-            console.warn("載入超時，強制關閉 Overlay");
-            hideLoading();
-        }
-    }, 5000);
-
-    try {
-        // 1. 先確認目前是否有 Session
-        console.log("正在檢查 Session...");
-        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-
-        if (sessionError) throw sessionError;
-
-        if (session) {
-            console.log("偵測到已登入帳號:", session.user.email);
-            currentUser = session.user;
-            await loadUserProfile();
-            showMainUI();
-        } else {
-            console.log("未登入，切換至登入模式");
-            showLoginUI();
-        }
-    } catch (e) {
-        console.error("初始化發生致命錯誤:", e);
-        showLoginUI(); // 報錯也強行跳到登入，讓使用者至少能看到介面
-    } finally {
-        hideLoading();
-    }
-
-    console.log("App Version: 2.0.2 - Post-Login Stability Fix");
-
-    // 2. 監聽後續的 Auth 狀態變化
+    // 監聽所有 Auth 變更 (包含初始化)
     supabaseClient.auth.onAuthStateChanged(async (event, session) => {
-        console.log("Auth 狀態變更事件:", event);
+        console.log(`Auth 事件發生: ${event}`, session ? "已取得 Session" : "無 Session");
 
         try {
-            if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
-                showLoading();
+            // 注意：INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED 都是有效登入狀態
+            if (session) {
                 currentUser = session.user;
-                console.log("登入成功，正在嘗試載入 Profile...");
+                console.log("登入成功:", currentUser.email);
 
+                // 嘗試載入 Profile，失敗也要繼續
                 try {
                     await loadUserProfile();
-                } catch (profileErr) {
-                    console.error("載入 Profile 失敗，進入回退模式:", profileErr);
-                    profile = { name: currentUser.email, role: 'none' };
+                } catch (e) {
+                    console.error("Profile 載入失敗 (回退模式):", e);
+                    profile = { name: currentUser.email, role: 'none', id: 'temp' };
                     updateRoleSelect();
                 }
 
                 showMainUI();
-            } else if (event === 'SIGNED_OUT') {
+            } else {
+                console.log("目前為未登入狀態");
                 currentUser = null;
                 profile = null;
                 showLoginUI();
             }
-        } catch (globalErr) {
-            console.error("Auth 監聽器發生全域錯誤:", globalErr);
+        } catch (err) {
+            console.error("Auth 處理過程中發生錯誤:", err);
             showLoginUI();
         } finally {
             hideLoading();
         }
     });
 
-    // 綁定基礎事件
+    // 綁定基礎事件 (只需綁定一次)
     loginForm.addEventListener('submit', handleLogin);
     logoutBtn.addEventListener('click', handleLogout);
     roleSelect.addEventListener('change', handleRoleSwitch);
@@ -122,38 +91,49 @@ async function init() {
 }
 
 async function loadUserProfile() {
+    console.log("正在從資料庫獲取使用者 Profile...");
     const { data, error } = await supabaseClient
         .from('profiles')
         .select('*')
         .eq('user_id', currentUser.id)
         .single();
 
-    if (!error && data) {
-        profile = data;
-        updateRoleSelect();
+    if (error) {
+        console.warn("無法取得 Profile (可能 RLS 尚未開通或資料未建立):", error.message);
+        // 如果是 Steve 預設的管理員帳號但還沒 profile，我們可以給他個臨時最高權限測試
+        if (currentUser.email === 'steve19860004@gmail.com') {
+            profile = { name: 'Steve (緊急權限)', role: 'admin', id: 'admin-temp' };
+        } else {
+            profile = { name: currentUser.email, role: 'none', id: 'none-temp' };
+        }
     } else {
-        console.error("查無 Profile:", error);
-        profile = { name: currentUser.email, role: 'none' };
-        updateRoleSelect();
+        profile = data;
     }
+
+    updateRoleSelect();
 }
 
 function updateRoleSelect() {
     roleSelect.innerHTML = '';
     const roles = [];
 
+    // 檢查角色
     if (profile.role === 'admin') {
-        roles.push({ id: 'admin', name: '平台管理主控台', role: 'admin' });
-        roles.push({ id: 'restaurant_mode', name: '模擬餐廳操作', role: 'restaurant' });
-        roles.push({ id: 'master_mode', name: '模擬師傅操作', role: 'master' });
+        roles.push({ val: 'admin', text: '🛡️ 平台管理主控台' });
+        roles.push({ val: 'restaurant', text: '🏪 模擬餐廳操作' });
+        roles.push({ val: 'master', text: '🛵 模擬師傅操作' });
+    } else if (profile.role === 'restaurant') {
+        roles.push({ val: 'restaurant', text: `🏪 ${profile.name}` });
+    } else if (profile.role === 'master') {
+        roles.push({ val: 'master', text: `🛵 ${profile.name}` });
     } else {
-        roles.push({ id: profile.id, name: profile.name, role: profile.role });
+        roles.push({ val: 'none', text: `🔒 等待審核: ${profile.name}` });
     }
 
     roles.forEach(r => {
         const opt = document.createElement('option');
-        opt.value = r.role;
-        opt.textContent = `${r.role === 'admin' ? '🛡️' : (r.role === 'restaurant' ? '🏪' : '🛵')} ${r.name}`;
+        opt.value = r.val;
+        opt.textContent = r.text;
         roleSelect.appendChild(opt);
     });
 }
