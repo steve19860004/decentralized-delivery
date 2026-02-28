@@ -136,8 +136,10 @@ window.orderNow = function (restaurantId, restaurantName, itemName, price) {
 window.updateQuantity = function (change) {
     const qtyInput = document.getElementById('checkout-quantity');
     const qtyDisplay = document.getElementById('checkout-quantity-display');
-    const unitPrice = Number(document.getElementById('checkout-price').value);
     const totalPriceDisplay = document.getElementById('checkout-price-display');
+
+    // (已移除與運費相關的固定金額加總，交由後台計算)
+    const unitPrice = parseFloat(document.getElementById('checkout-price').value);
 
     let currentQty = parseInt(qtyInput.value) || 1;
     let newQty = currentQty + change;
@@ -174,30 +176,36 @@ if (checkoutForm) {
         const phone = document.getElementById('checkout-phone').value;
         const address = document.getElementById('checkout-address').value;
         const note = document.getElementById('checkout-note').value;
+        const restaurantName = document.getElementById('checkout-restaurant-name').textContent;
 
         const btn = document.getElementById('checkout-submit-btn');
         const errorMsg = document.getElementById('checkout-error');
 
-        const originalText = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '🕒 正在為您建立訂單並呼叫外送員...';
+        btn.innerHTML = `<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white inline-block"></div> 訂單處理中...`;
         errorMsg.classList.add('hidden');
 
-        // 組合訂單描述
-        let description = `[顧客直購] 餐點: ${itemName} x ${quantity} | 電話: ${phone} | 送達: ${address}`;
-        if (note.trim()) {
-            description += ` | 備註: ${note}`;
-        }
+        // 組合詳細的訂單文字
+        const orderDescription = `[直客點餐] ${itemName} x${quantity} 
+📞 ${phone} 
+📍 ${address} 
+💬 ${note ? note : '無'}`;
 
         try {
-            // 寫入到 jobs 表做為 pending 外送單
-            const { error: dbError } = await supabaseClient.from('jobs').insert([{
-                restaurant_id: restaurantId,
-                description: description,
-                total_amount: finalPrice
-            }]);
+            // 寫入 jobs 資料表 (觸發 Webhook 用)
+            // 包含給 Google Maps 估算距離的專用欄位 destination_address
+            // 餐廳出發地暫定使用餐廳名稱加上台北市（建議未來擴充 profiles 地址欄位）
+            const { error } = await supabaseClient.from('jobs').insert([
+                {
+                    restaurant_id: restaurantId,
+                    description: orderDescription,
+                    total_amount: finalPrice, // 只有餐費，運費將由 n8n 計算後 Update 回來
+                    destination_address: address,
+                    restaurant_address: `台北市 ${restaurantName}`
+                }
+            ]);
 
-            if (dbError) throw dbError;
+            if (error) throw error;
 
             btn.innerHTML = '✅ 訂單已成功送出！';
             btn.classList.replace('from-indigo-600', 'from-green-500');
