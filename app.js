@@ -36,50 +36,70 @@ const masterHistory = document.getElementById('master-history');
 const adminAddUserForm = document.getElementById('admin-add-user');
 const adminUserList = document.getElementById('admin-user-list');
 
-console.log("App Version: 2.0.3 - Final Auth Consolidation");
+console.log("App Version: 2.0.4 - Absolute Loading Fix");
+
+// ==========================================
+// 0. 故障保險 (Failsafe Watchdog)
+// ==========================================
+// 隨時監控，如果加載畫面轉超過 4 秒，不論什麼情況都強行關閉。
+setInterval(() => {
+    if (loadingOverlay && !loadingOverlay.classList.contains('hidden')) {
+        const now = Date.now();
+        if (!window._loadingStartTime) window._loadingStartTime = now;
+        if (now - window._loadingStartTime > 4000) {
+            console.warn("偵測到加載鎖死，觸發自救機制強行解鎖...");
+            hideLoading();
+            window._loadingStartTime = null;
+        }
+    } else {
+        window._loadingStartTime = null;
+    }
+}, 500);
 
 // ==========================================
 // 3. 初始化與身份監聽 (簡化為單一流向)
 // ==========================================
 async function init() {
-    console.log("系統初始化...");
+    console.log("正在進入系統部署與初始化...");
     showLoading();
 
-    // 監聽所有 Auth 變更 (包含初始化)
+    // 監聽所有 Auth 變更
     supabaseClient.auth.onAuthStateChanged(async (event, session) => {
-        console.log(`Auth 事件發生: ${event}`, session ? "已取得 Session" : "無 Session");
+        console.log(`Auth 回調: ${event}`);
 
         try {
-            // 注意：INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED 都是有效登入狀態
             if (session) {
                 currentUser = session.user;
-                console.log("登入成功:", currentUser.email);
+                console.log("登入確認成功:", currentUser.email);
 
-                // 嘗試載入 Profile，失敗也要繼續
                 try {
                     await loadUserProfile();
                 } catch (e) {
-                    console.error("Profile 載入失敗 (回退模式):", e);
-                    profile = { name: currentUser.email, role: 'none', id: 'temp' };
+                    console.error("讀取 Profile 異常:", e);
+                    // 災難恢復：如果是 Steve 大，給予緊急權限
+                    if (currentUser.email === 'steve19860004@gmail.com') {
+                        profile = { name: 'Steve (緊急進入模式)', role: 'admin', id: 'emergency' };
+                    } else {
+                        profile = { name: currentUser.email, role: 'none', id: 'temp' };
+                    }
                     updateRoleSelect();
                 }
 
                 showMainUI();
             } else {
-                console.log("目前為未登入狀態");
                 currentUser = null;
                 profile = null;
                 showLoginUI();
             }
-        } catch (err) {
-            console.error("Auth 處理過程中發生錯誤:", err);
+        } catch (globalErr) {
+            console.error("Auth 嚴重初始化錯誤:", globalErr);
             showLoginUI();
         } finally {
             hideLoading();
         }
     });
 
-    // 綁定基礎事件 (只需綁定一次)
+    // 綁定基礎事件
     loginForm.addEventListener('submit', handleLogin);
     logoutBtn.addEventListener('click', handleLogout);
     roleSelect.addEventListener('change', handleRoleSwitch);
@@ -91,7 +111,7 @@ async function init() {
 }
 
 async function loadUserProfile() {
-    console.log("正在從資料庫獲取使用者 Profile...");
+    console.log("獲取身分資料中...");
     const { data, error } = await supabaseClient
         .from('profiles')
         .select('*')
@@ -99,17 +119,11 @@ async function loadUserProfile() {
         .single();
 
     if (error) {
-        console.warn("無法取得 Profile (可能 RLS 尚未開通或資料未建立):", error.message);
-        // 如果是 Steve 預設的管理員帳號但還沒 profile，我們可以給他個臨時最高權限測試
-        if (currentUser.email === 'steve19860004@gmail.com') {
-            profile = { name: 'Steve (緊急權限)', role: 'admin', id: 'admin-temp' };
-        } else {
-            profile = { name: currentUser.email, role: 'none', id: 'none-temp' };
-        }
-    } else {
-        profile = data;
+        console.warn("Profile 獲取失敗:", error.message);
+        throw error; // 交給 init 處理
     }
 
+    profile = data;
     updateRoleSelect();
 }
 
@@ -139,9 +153,10 @@ function updateRoleSelect() {
 }
 
 // ==========================================
-// 4. 視圖切換
+// 4. 視圖切換 (增加安全鎖)
 // ==========================================
 function showLoginUI() {
+    console.log("切換至登入模式");
     loginView.classList.remove('hidden');
     restaurantView.classList.add('hidden');
     masterView.classList.add('hidden');
@@ -151,6 +166,7 @@ function showLoginUI() {
 }
 
 function showMainUI() {
+    console.log("切換至主導向介面");
     loginView.classList.add('hidden');
     roleDisplay.classList.remove('hidden');
     logoutBtn.classList.remove('hidden');
@@ -159,24 +175,29 @@ function showMainUI() {
 
 async function handleRoleSwitch() {
     const activeRole = roleSelect.value;
+    console.log(`正在切換角色視圖: ${activeRole}`);
     showLoading();
 
-    restaurantView.classList.add('hidden');
-    masterView.classList.add('hidden');
-    adminView.classList.add('hidden');
+    try {
+        restaurantView.classList.add('hidden');
+        masterView.classList.add('hidden');
+        adminView.classList.add('hidden');
 
-    if (activeRole === 'admin') {
-        adminView.classList.remove('hidden');
-        await loadAdminData();
-    } else if (activeRole === 'restaurant') {
-        restaurantView.classList.remove('hidden');
-        await loadRestaurantData();
-    } else if (activeRole === 'master') {
-        masterView.classList.remove('hidden');
-        await loadMasterData();
+        if (activeRole === 'admin') {
+            adminView.classList.remove('hidden');
+            await loadAdminData();
+        } else if (activeRole === 'restaurant') {
+            restaurantView.classList.remove('hidden');
+            await loadRestaurantData();
+        } else if (activeRole === 'master') {
+            masterView.classList.remove('hidden');
+            await loadMasterData();
+        }
+    } catch (err) {
+        console.error("切換視圖發生錯誤:", err);
+    } finally {
+        hideLoading(); // <--- 絕對會執行，不論成功或失敗
     }
-
-    hideLoading();
 }
 
 // ==========================================
