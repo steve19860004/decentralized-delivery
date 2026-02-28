@@ -12,10 +12,10 @@ async function initStore() {
     console.log("正在載入首頁餐廳總覽...");
 
     try {
-        // 1. 撈出所有上架的菜單，並一併關聯出店家的 profile name 和聯絡網址
+        // 1. 撈出所有上架的菜單，並一併關聯出店家的 profile name、聯絡網址還有最重要的「真實外送起點地址」
         const { data: menuData, error: menuError } = await supabaseClient
             .from('menus')
-            .select('*, profiles!menus_restaurant_id_fkey(name, contact_url)')
+            .select('*, profiles!menus_restaurant_id_fkey(name, contact_url, address)')
             .eq('is_available', true)
             .order('created_at', { ascending: false });
 
@@ -27,12 +27,14 @@ async function initStore() {
             const restId = item.restaurant_id;
             const restName = item.profiles ? item.profiles.name : '神秘店家';
             const contactUrl = item.profiles ? item.profiles.contact_url : '';
+            const address = (item.profiles && item.profiles.address) ? item.profiles.address : '台北市信義區市府路1號'; // 兼容防呆
 
             if (!groupedMenus[restId]) {
                 groupedMenus[restId] = {
                     id: restId,
                     name: restName,
                     contact_url: contactUrl,
+                    address: address, // 店家地址
                     items: []
                 };
             }
@@ -90,8 +92,8 @@ function renderStores(stores) {
                         <div class="font-bold text-gray-800 leading-tight mb-1 text-sm">${item.item_name}</div>
                         <div class="flex justify-between items-end mt-2">
                             <div class="text-indigo-600 font-black">$${item.price}</div>
-                            <!-- 呼叫下單彈窗模組，傳入店家ID與餐點資訊 -->
-                            <button onclick="orderNow('${store.id}', '${store.name}', '${item.item_name}', ${item.price})" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded-full transition shadow-sm">想吃</button>
+                            <!-- 呼叫下單彈窗模組，傳入店家ID與餐點資訊及真實地址 -->
+                            <button onclick="orderNow('${store.id}', '${store.name}', '${item.item_name}', ${item.price}, '${store.address}')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded-full transition shadow-sm">想吃</button>
                         </div>
                     </div>
                 </div>
@@ -109,10 +111,13 @@ function renderStores(stores) {
 // ------------------------------------------
 
 // 1. 開啟結帳小視窗
-window.orderNow = function (restaurantId, restaurantName, itemName, price) {
+window.orderNow = function (restaurantId, restaurantName, itemName, price, restaurantAddress) {
     document.getElementById('checkout-restaurant-id').value = restaurantId;
     document.getElementById('checkout-item-name').value = itemName;
     document.getElementById('checkout-price').value = price;
+
+    // 將店家動態地址存在全域，讓 Google API 取用
+    window.currentRestaurantAddress = restaurantAddress || '台北市信義區市府路1號';
 
     // 初始化數量為 1
     document.getElementById('checkout-quantity').value = 1;
@@ -201,7 +206,7 @@ if (calcFeeBtn && addressInput) {
         // 呼叫 Google 地圖路線規劃
         const service = new google.maps.DistanceMatrixService();
         service.getDistanceMatrix({
-            origins: ['台北市信義區市府路1號'], // 測試用固定起點
+            origins: [window.currentRestaurantAddress], // 動態帶入店家註冊的真實地址
             destinations: [dest],
             travelMode: 'DRIVING'
         }, (response, status) => {
@@ -298,7 +303,7 @@ if (checkoutForm) {
                     description: orderDescription,
                     total_amount: finalPrice, // 只有餐費，運費將由 n8n 計算後 Update 回來
                     destination_address: address,
-                    restaurant_address: '台北市信義區市府路1號' // 先用固定真實地址測試
+                    restaurant_address: window.currentRestaurantAddress // 發給後台大腦一樣的真實地址
                 }
             ]);
 

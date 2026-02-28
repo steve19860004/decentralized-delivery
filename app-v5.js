@@ -22,6 +22,7 @@ const masterView = document.getElementById('master-view');
 const adminView = document.getElementById('admin-view');
 const loadingOverlay = document.getElementById('loading-overlay');
 const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
 const logoutBtn = document.getElementById('logout-btn');
 const roleDisplay = document.getElementById('role-display');
 const roleSelect = document.getElementById('role-select');
@@ -94,6 +95,7 @@ async function init() {
     // 綁定基礎事件
     try {
         if (loginForm) loginForm.addEventListener('submit', handleLogin);
+        if (registerForm) registerForm.addEventListener('submit', handleRegister);
         if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
         if (roleSelect) roleSelect.addEventListener('change', handleRoleSwitch);
         if (orderForm) orderForm.addEventListener('submit', handleNewOrder);
@@ -111,6 +113,10 @@ async function init() {
         // 綁定店家聯絡網址表單
         const contactForm = document.getElementById('contact-form');
         if (contactForm) contactForm.addEventListener('submit', handleContactSubmit);
+
+        // 綁定店家外送地址表單
+        const addressForm = document.getElementById('address-form');
+        if (addressForm) addressForm.addEventListener('submit', handleAddressSubmit);
 
         calculatePreview();
     } catch (eventErr) {
@@ -244,8 +250,87 @@ async function handleRoleSwitch() {
 }
 
 // ==========================================
-// 5. Auth Action (暴力主動版)
+// 5. Auth Action (登入與註冊)
 // ==========================================
+window.toggleAuthMode = function (mode) {
+    const lForm = document.getElementById('login-form');
+    const rForm = document.getElementById('register-form');
+    const title = document.getElementById('auth-title');
+    const subtitle = document.getElementById('auth-subtitle');
+    const err = document.getElementById('login-error');
+
+    err.classList.add('hidden');
+
+    if (mode === 'register') {
+        lForm.classList.add('hidden');
+        rForm.classList.remove('hidden');
+        title.textContent = '申請加盟送';
+        subtitle.textContent = '填寫資料立即開通您的外送品牌館';
+    } else {
+        rForm.classList.add('hidden');
+        lForm.classList.remove('hidden');
+        title.textContent = '安全登入';
+        subtitle.textContent = '請輸入您的帳號密碼以開始操作';
+    }
+};
+
+async function handleRegister(e) {
+    e.preventDefault();
+    const email = document.getElementById('reg-email').value;
+    const password = document.getElementById('reg-password').value;
+    const name = document.getElementById('reg-name').value;
+    const address = document.getElementById('reg-address').value;
+    const errorMsg = document.getElementById('login-error');
+
+    showLoading();
+    errorMsg.classList.remove('hidden');
+    errorMsg.className = "text-center text-sm mt-4 text-blue-600";
+    errorMsg.textContent = "1. [開通中] 正在註冊餐廳帳號...";
+
+    try {
+        // 1. Supabase Auth 註冊
+        const { data, error } = await supabaseClient.auth.signUp({
+            email,
+            password
+        });
+
+        if (error) throw error;
+
+        errorMsg.textContent = "2. [開通中] 正在綁定出發地址與店名...";
+
+        // 2. 自動在 profiles 表格寫入一筆身分為 restaurant 的資料
+        // 注意：telegram_id 是必填 (依據 schema) 且須為 unique，此處給予一個暫時的亂數
+        const pendingTelegramId = 'pending-' + Date.now();
+        const { error: profileError } = await supabaseClient.from('profiles').insert([
+            {
+                user_id: data.user.id,
+                name: name,
+                telegram_id: pendingTelegramId,
+                role: 'restaurant',
+                address: address
+            }
+        ]);
+
+        if (profileError) {
+            console.error("Profile 寫入錯誤:", profileError);
+            throw new Error("基本建檔失敗：" + profileError.message);
+        }
+
+        errorMsg.className = "text-center text-sm mt-4 text-green-600 font-bold bg-green-50 p-2 rounded";
+        errorMsg.textContent = "✅ 開通成功！正在為您導向後台...";
+
+        // 主動執行登入連動流程
+        await _performLoginFlow(data.user);
+
+    } catch (err) {
+        console.error("註冊失敗:", err);
+        errorMsg.className = "text-center text-sm mt-4 text-red-500 bg-red-50 p-2 rounded";
+        errorMsg.textContent = "❌ 註冊失敗: " + err.message;
+    } finally {
+        hideLoading();
+    }
+}
+
 async function handleLogin(e) {
     e.preventDefault();
     const email = document.getElementById('login-email').value;
@@ -377,6 +462,42 @@ async function handleContactSubmit(e) {
     }
 }
 
+async function handleAddressSubmit(e) {
+    e.preventDefault();
+    if (!profile) return;
+
+    const addressInput = document.getElementById('address-input');
+    const btn = document.getElementById('address-submit-btn');
+    const newAddress = addressInput.value.trim();
+
+    if (!newAddress) {
+        alert("請輸入真實出發地址");
+        return;
+    }
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '儲存中...';
+
+    const { error } = await supabaseClient
+        .from('profiles')
+        .update({ address: newAddress })
+        .eq('id', profile.id);
+
+    if (error) {
+        alert("儲存失敗: " + error.message);
+        btn.disabled = false;
+        btn.textContent = originalText;
+    } else {
+        profile.address = newAddress; // 更新本地狀態
+        btn.textContent = '✅ 動態起點已儲存';
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }, 2000);
+    }
+}
+
 async function handleMenuSubmit(e) {
     e.preventDefault();
     if (!profile) return;
@@ -474,10 +595,15 @@ async function handleNewOrder(e) {
 }
 
 async function loadRestaurantData() {
-    // 0. 更新 UI 上的店家聯絡網址
+    // 0. 更新 UI 上的店家聯絡網址與真實地址
     const urlInput = document.getElementById('contact-url-input');
     if (urlInput && profile) {
         urlInput.value = profile.contact_url || '';
+    }
+
+    const addressInput = document.getElementById('address-input');
+    if (addressInput && profile) {
+        addressInput.value = profile.address || '';
     }
 
     // 1. 讀取並渲染訂單歷史
