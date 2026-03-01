@@ -94,6 +94,23 @@
                             class="w-full p-2 border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition text-blue-800 bg-blue-50 font-bold">
                         <p class="text-[10px] text-gray-400 mt-1">此地址將作為客端點選本店時，地圖計算運費的唯一出發點基準。</p>
                     </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">📱 Telegram
+                            Chat ID
+                            (發送/接收訂單通知必填)</label>
+                        <input type="text" id="reg-telegram-id" required placeholder="請向機器人獲取數字 ID，例：123456789"
+                            class="w-full p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-gray-700">
+                        <p class="text-[10px] text-gray-400 mt-1">若尚未取得，請在 Telegram 搜尋我們的機器人。</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">🎭
+                            註冊身份</label>
+                        <select id="reg-role"
+                            class="w-full p-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition font-bold text-indigo-700 bg-indigo-50">
+                            <option value="restaurant">🍽️ 餐廳老闆</option>
+                            <option value="master">🛵 跑腿師傅 (外送員)</option>
+                        </select>
+                    </div>
 
                     <button type="submit"
                         class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 mt-4 rounded-xl shadow-lg shadow-indigo-200 transition transform active:scale-95">

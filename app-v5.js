@@ -280,6 +280,8 @@ async function handleRegister(e) {
     const password = document.getElementById('reg-password').value;
     const name = document.getElementById('reg-name').value;
     const address = document.getElementById('reg-address').value;
+    const telegramId = document.getElementById('reg-telegram-id').value;
+    const role = document.getElementById('reg-role').value;
     const errorMsg = document.getElementById('login-error');
 
     showLoading();
@@ -298,15 +300,13 @@ async function handleRegister(e) {
 
         errorMsg.textContent = "2. [開通中] 正在綁定出發地址與店名...";
 
-        // 2. 自動在 profiles 表格寫入一筆身分為 restaurant 的資料
-        // 注意：telegram_id 是必填 (依據 schema) 且須為 unique，此處給予一個暫時的亂數
-        const pendingTelegramId = 'pending-' + Date.now();
+        // 2. 在 profiles 表格寫入身分資料與 Telegram ID
         const { error: profileError } = await supabaseClient.from('profiles').insert([
             {
                 user_id: data.user.id,
                 name: name,
-                telegram_id: pendingTelegramId,
-                role: 'restaurant',
+                telegram_id: telegramId,
+                role: role,
                 address: address
             }
         ]);
